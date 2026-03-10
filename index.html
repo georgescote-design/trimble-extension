@@ -18,9 +18,7 @@
     <div class="card">
         <h3>Filtre de Propriétés</h3>
         <div id="status">Connexion...</div>
-        
         <button id="btn-scan">SCANNER LA SÉLECTION</button>
-        
         <div id="ui-filter" style="display:none;">
             <select id="prop-selector" style="margin-top:15px;"></select>
             <div id="results"></div>
@@ -34,8 +32,7 @@
         async function init() {
             try {
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-                document.getElementById('status').innerHTML = "✅ Système prêt (Module Viewer détecté)";
-                
+                document.getElementById('status').innerHTML = "✅ Système prêt";
                 if(API.extension && API.extension.requestPermission) {
                     await API.extension.requestPermission("accesstoken");
                 }
@@ -47,27 +44,31 @@
         document.getElementById('btn-scan').onclick = async function() {
             const btn = this;
             const status = document.getElementById('status');
-            btn.innerText = "⏳ ANALYSE EN COURS...";
+            btn.innerText = "⏳ ANALYSE...";
             btn.style.backgroundColor = "#ff9800";
 
             try {
-                // Utilisation du module VIEWER détecté sur ton image
+                // 1. On récupère les IDs sélectionnés
                 const ids = await API.viewer.getSelection();
                 
                 if (!ids || ids.length === 0) {
-                    status.innerText = "⚠️ RIEN N'EST SÉLECTIONNÉ DANS LA VUE 3D";
+                    status.innerText = "⚠️ RIEN N'EST SÉLECTIONNÉ";
                     btn.innerText = "SCANNER LA SÉLECTION";
                     btn.style.backgroundColor = "#0078d4";
                     return;
                 }
 
-                selectionData = await API.project.getProperties(ids);
+                // 2. CORRECTION : On demande les propriétés au VIEWER et non au PROJECT
+                selectionData = await API.viewer.getObjectProperties(ids);
+                
                 const props = new Set();
                 selectionData.forEach(obj => {
                     if(obj.properties) Object.keys(obj.properties).forEach(p => props.add(p));
-                    if(obj.propertySets) obj.propertySets.forEach(ps => {
-                        if(ps.properties) Object.keys(ps.properties).forEach(p => props.add(p));
-                    });
+                    if(obj.propertySets) {
+                        obj.propertySets.forEach(ps => {
+                            if(ps.properties) Object.keys(ps.properties).forEach(p => props.add(p));
+                        });
+                    }
                 });
 
                 const sel = document.getElementById('prop-selector');
@@ -94,7 +95,6 @@
             const res = document.getElementById('results');
             res.innerHTML = "";
             const groups = {};
-
             selectionData.forEach(o => {
                 let v = "Inconnu";
                 if(o.properties && o.properties[p]) v = o.properties[p];
@@ -110,13 +110,11 @@
                 div.className = "row";
                 div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v} (${groups[v].length})</span>`;
                 div.querySelector('input').onchange = (ev) => {
-                    // Cache/Affiche via le module VIEW
                     API.view.setObjectVisibility(groups[v], ev.target.checked);
                 };
                 res.appendChild(div);
             });
         };
-
         init();
     </script>
 </body>
