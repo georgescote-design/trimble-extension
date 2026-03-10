@@ -1,90 +1,117 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="referrer" content="no-referrer-when-downgrade">
-    <title>Filtre Intelligent Trimble</title>
+    <title>Filtre BIM Direct</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; padding: 15px; background-color: #f4f7f9; color: #333; margin: 0; }
-        .container { background: white; border: 1px solid #0078d4; border-radius: 8px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-        h2 { color: #0078d4; font-size: 18px; margin-top: 0; border-bottom: 2px solid #0078d4; padding-bottom: 10px; }
-        .instruction { font-size: 12px; color: #666; margin-bottom: 15px; line-height: 1.4; }
-        button { width: 100%; padding: 12px; background-color: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; transition: 0.2s; }
-        button:hover { background-color: #005a9e; }
-        button:disabled { background-color: #ccc; cursor: not-allowed; }
-        select { width: 100%; padding: 10px; border-radius: 4px; border: 1px solid #ccc; margin-bottom: 15px; background: #fff; }
-        .status-bar { font-size: 12px; font-weight: bold; text-align: center; margin-bottom: 15px; padding: 5px; border-radius: 4px; background: #eee; }
-        .layer-item { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; font-size: 13px; background: #fff; }
-        .layer-item:hover { background: #f9f9f9; }
-        .count { margin-left: auto; background: #0078d4; color: white; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
-        input[type="checkbox"] { cursor: pointer; width: 18px; height: 18px; margin-right: 10px; }
+        body { font-family: sans-serif; padding: 15px; background: #fff; text-align: center; }
+        .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; }
+        button { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
+        #status { font-size: 13px; color: #0078d4; margin-bottom: 10px; font-weight: bold; }
+        select { width: 100%; padding: 10px; margin-bottom: 15px; }
     </style>
 </head>
 <body>
-
-<div class="container">
-    <h2>Filtre de Propriétés</h2>
-    <div id="status" class="status-bar">Initialisation de l'API...</div>
-    
-    <p class="instruction">1. Sélectionnez des objets dans la vue 3D.<br>2. Cliquez sur le bouton ci-dessous.</p>
-    <button id="btn-scan" disabled>Scanner la sélection</button>
-    
-    <div id="ui-filter" style="display:none;">
-        <label for="prop-selector" style="font-weight: bold; font-size: 13px;">Filtrer par paramètre :</label>
-        <select id="prop-selector"></select>
-        <div id="results"></div>
+    <div class="card">
+        <h3>Générateur de Calques</h3>
+        <div id="status">🔴 Non Connecté</div>
+        
+        <button id="btn-connect">1. ACTIVER L'EXTENSION</button>
+        
+        <div id="ui-main" style="display:none;">
+            <button id="btn-scan" style="background: #28a745;">2. SCANNER LA SÉLECTION</button>
+            <select id="prop-selector"></select>
+            <div id="layers" style="text-align:left;"></div>
+        </div>
     </div>
-</div>
-
-<script src="trimble.api.js"></script>
 
 <script>
-    let api = null;
-    let selectionData = [];
+    // API INTEGRÉE
+    const TrimbleAPI = {
+        connect: () => new Promise(resolve => {
+            const handler = e => {
+                if (e.data && e.data.method === "connected") {
+                    window.removeEventListener("message", handler);
+                    let rid = 0; const cbs = {};
+                    window.addEventListener("message", ev => {
+                        if (ev.data && ev.data.callbackId) {
+                            const cb = cbs[ev.data.callbackId];
+                            if (cb) { delete cbs[ev.data.callbackId]; cb(ev.data.data); }
+                        }
+                    });
+                    const req = (m, p) => {
+                        const id = ++rid;
+                        return new Promise(res => {
+                            cbs[id] = res;
+                            window.parent.postMessage({method: m, params: p, callbackId: id}, "*");
+                        });
+                    };
+                    resolve({
+                        getSelection: () => req("ui.getSelection"),
+                        getProps: (ids) => req("project.getProperties", {objectIds: ids}),
+                        setVis: (ids, v) => req("visual.setObjectVisibility", {objectIds: ids, visible: v})
+                    });
+                }
+            };
+            window.addEventListener("message", handler);
+            window.parent.postMessage({method: "connect"}, "*");
+        })
+    };
 
-    async function start() {
+    let api, selectionData = [];
+
+    // ACTION DU BOUTON 1
+    document.getElementById('btn-connect').onclick = async () => {
         const status = document.getElementById('status');
-        // Pause pour stabiliser la session admin
-        await new Promise(r => setTimeout(r, 1500));
-
+        status.innerText = "⏳ Tentative...";
         try {
-            if (typeof TrimbleConnectWorkspace === 'undefined') {
-                status.innerText = "❌ Fichier trimble.api.js manquant";
-                status.style.color = "red";
-                return;
-            }
-            
-            api = await TrimbleConnectWorkspace.connect();
-            status.innerText = "✅ Admin Connecté";
-            status.style.color = "green";
-            document.getElementById('btn-scan').disabled = false;
+            api = await TrimbleAPI.connect();
+            status.innerText = "✅ CONNECTÉ !";
+            document.getElementById('btn-connect').style.display = "none";
+            document.getElementById('ui-main').style.display = "block";
         } catch (e) {
-            status.innerText = "⚠️ Erreur de connexion API";
-            console.error(e);
+            status.innerText = "❌ Échec. Réessayez.";
         }
-    }
+    };
 
+    // ACTION DU BOUTON 2
     document.getElementById('btn-scan').onclick = async () => {
-        const status = document.getElementById('status');
-        const results = document.getElementById('results');
-        const uiFilter = document.getElementById('ui-filter');
+        const ids = await api.getSelection();
+        if (!ids || ids.length === 0) return alert("Sélectionnez des objets en 3D !");
         
-        status.innerText = "⏳ Analyse en cours...";
-        results.innerHTML = "";
-        
-        try {
-            const ids = await api.ui.getSelection();
-            
-            if (!ids || ids.length === 0) {
-                status.innerText = "⚠️ Sélectionnez des objets d'abord !";
-                return;
-            }
+        selectionData = await api.getProps(ids);
+        const props = new Set();
+        selectionData.forEach(o => {
+            if(o.properties) Object.keys(o.properties).forEach(p => props.add(p));
+            if(o.propertySets) o.propertySets.forEach(ps => { if(ps.properties) Object.keys(ps.properties).forEach(p => props.add(p)); });
+        });
 
-            // Récupération blindée contre les erreurs 404/403
-            selectionData = await api.project.getProperties(ids).catch(err => {
-                console.warn("Certaines propriétés sont inaccessibles", err);
-                return [];
-            });
+        const sel = document.getElementById('prop-selector');
+        sel.innerHTML = '<option value="">-- Choisir un paramètre --</option>';
+        Array.from(props).sort().forEach(p => sel.innerHTML += `<option value="${p}">${p}</option>`);
+    };
 
-            if (!selectionData || selectionData.length === 0) {
+    document.getElementById('prop-selector').onchange = (e) => {
+        const p = e.target.value;
+        const layers = document.getElementById('layers');
+        layers.innerHTML = "";
+        const groups = {};
+
+        selectionData.forEach(o => {
+            let v = "Inconnu";
+            if(o.properties && o.properties[p]) v = o.properties[p];
+            else if(o.propertySets) o.propertySets.forEach(ps => { if(ps.properties && ps.properties[p]) v = ps.properties[p]; });
+            if(!groups[v]) groups[v] = [];
+            groups[v].push(o.id);
+        });
+
+        Object.keys(groups).sort().forEach(v => {
+            const div = document.createElement('div');
+            div.innerHTML = `<label><input type="checkbox" checked> ${v} (${groups[v].length})</label>`;
+            div.querySelector('input').onchange = (ev) => api.setVis(groups[v], ev.target.checked);
+            layers.appendChild(div);
+        });
+    };
+</script>
+</body>
+</html>
