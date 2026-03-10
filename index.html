@@ -2,38 +2,101 @@
 <html>
 <head>
     <meta charset="UTF-8">
+    <meta name="referrer" content="no-referrer-when-downgrade">
     <script src="https://connect-extensions.trimble.com/js/trimble.connect.workspace.api.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 15px; background: white; }
+        .card { border: 1px solid #ccc; padding: 15px; border-radius: 8px; }
+        button { width: 100%; padding: 10px; background: #0078d4; color: white; border: none; cursor: pointer; }
+        #status { margin-top: 10px; font-size: 12px; color: #666; }
+    </style>
 </head>
-<body style="background: white; padding: 20px; border: 5px solid red;">
+<body>
 
-    <h2 id="titre">Test de Connexion Directe</h2>
-    <p id="status">Statut : En attente du signal Trimble...</p>
-    <button id="btn-action" style="display:none; padding:15px; background:blue; color:white;">Scanner</button>
+    <div class="card">
+        <h3>Générateur de Calques</h3>
+        <button id="btn-scan" disabled>Initialisation...</button>
+        <div id="status">Attente du script Trimble...</div>
+        
+        <div id="ui-area" style="display:none; margin-top:15px;">
+            <select id="prop-selector" style="width:100%; padding:8px;"></select>
+            <div id="layers" style="margin-top:10px;"></div>
+        </div>
+    </div>
 
     <script>
-        // On essaie de se connecter immédiatement et de force
-        async function start() {
-            const status = document.getElementById('status');
-            try {
-                // On force l'API à se réveiller
-                const api = await TrimbleConnectWorkspace.connect();
-                status.innerHTML = "<b style='color:green'>ENFIN CONNECTÉ !</b>";
-                document.body.style.borderColor = "green";
-                document.getElementById('btn-action').style.display = "block";
-                
-                document.getElementById('btn-action').onclick = async () => {
-                    const sel = await api.ui.getSelection();
-                    alert("Succès ! Objets sélectionnés : " + sel.length);
-                };
-            } catch (err) {
-                status.innerText = "Trimble ne répond pas. Erreur : " + err.message;
+        let api = null;
+        let selectionProps = [];
+
+        // Fonction pour vérifier si le script est chargé
+        function checkScript() {
+            if (typeof TrimbleConnectWorkspace !== 'undefined') {
+                startConnect();
+            } else {
+                setTimeout(checkScript, 500); // Réessaie toutes les demi-secondes
             }
         }
 
-        // On lance le test
-        start();
-        // Et on relance après 3 secondes au cas où
-        setTimeout(start, 3000);
+        async function startConnect() {
+            try {
+                document.getElementById('status').innerText = "Connexion à l'API...";
+                api = await TrimbleConnectWorkspace.connect();
+                document.getElementById('status').innerText = "✅ Connecté !";
+                document.getElementById('btn-scan').disabled = false;
+                document.getElementById('btn-scan').innerText = "Scanner la sélection";
+            } catch (e) {
+                document.getElementById('status').innerText = "Erreur de poignée de main : " + e.message;
+            }
+        }
+
+        document.getElementById('btn-scan').onclick = async () => {
+            const ids = await api.ui.getSelection();
+            if (ids.length === 0) return alert("Sélectionnez des objets en 3D !");
+            
+            selectionProps = await api.project.getProperties(ids);
+            const names = new Set();
+            selectionProps.forEach(obj => {
+                if (obj.properties) Object.keys(obj.properties).forEach(n => names.add(n));
+                if (obj.propertySets) obj.propertySets.forEach(ps => {
+                    if (ps.properties) Object.keys(ps.properties).forEach(n => names.add(n));
+                });
+            });
+
+            const sel = document.getElementById('prop-selector');
+            sel.innerHTML = '<option>-- Choisir un paramètre --</option>';
+            Array.from(names).sort().forEach(n => {
+                const opt = document.createElement('option');
+                opt.value = opt.innerText = n;
+                sel.appendChild(opt);
+            });
+            document.getElementById('ui-area').style.display = 'block';
+        };
+
+        document.getElementById('prop-selector').onchange = (e) => {
+            const prop = e.target.value;
+            const container = document.getElementById('layers');
+            container.innerHTML = "";
+            const groups = {};
+
+            selectionProps.forEach(obj => {
+                let val = "Inconnu";
+                if (obj.properties && obj.properties[prop]) val = obj.properties[prop];
+                else if (obj.propertySets) {
+                    obj.propertySets.forEach(ps => { if(ps.properties && ps.properties[prop]) val = ps.properties[prop]; });
+                }
+                if (!groups[val]) groups[val] = [];
+                groups[val].push(obj.id);
+            });
+
+            Object.keys(groups).forEach(v => {
+                const div = document.createElement('div');
+                div.innerHTML = `<input type="checkbox" checked> ${v} (${groups[v].length})`;
+                div.querySelector('input').onchange = (ev) => api.visual.setObjectVisibility(groups[v], ev.target.checked);
+                container.appendChild(div);
+            });
+        };
+
+        checkScript();
     </script>
 </body>
 </html>
