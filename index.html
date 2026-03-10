@@ -17,7 +17,7 @@
 <body>
     <div class="card">
         <h3>Filtre de Propriétés</h3>
-        <div id="status">✅ Prêt</div>
+        <div id="status">✅ Système prêt</div>
         <button id="btn-scan">SCANNER LA SÉLECTION</button>
         <div id="ui-filter" style="display:none;">
             <select id="prop-selector" style="margin-top:15px;"></select>
@@ -32,10 +32,11 @@
         async function init() {
             try {
                 API = await TrimbleConnectWorkspace.connect(window.parent);
+                // Demande la permission d'accès aux données du projet
                 if(API.extension && API.extension.requestPermission) {
                     await API.extension.requestPermission("accesstoken");
                 }
-            } catch (e) { console.error(e); }
+            } catch (e) { console.error("Erreur init:", e); }
         }
 
         document.getElementById('btn-scan').onclick = async function() {
@@ -45,7 +46,7 @@
             btn.style.backgroundColor = "#ff9800";
 
             try {
-                // CORRECTION 1 : On force la récupération de la sélection du VIEWER
+                // 1. Récupérer les IDs de ce qui est sélectionné (Module VIEWER)
                 const ids = await API.viewer.getSelection();
                 
                 if (!ids || ids.length === 0) {
@@ -57,14 +58,15 @@
 
                 status.innerText = "Lecture de " + ids.length + " objets...";
 
-                // CORRECTION 2 : On demande les propriétés au module PROJECT qui est plus complet que le Viewer
-                selectionData = await API.project.getProperties(ids);
-                
+                // 2. RÉCUPÉRATION DES PROPRIÉTÉS (La commande exacte est getObjectProperties)
+                // On utilise le module VIEWER car c'est lui qui est visible dans ton projet
+                selectionData = await API.viewer.getObjectProperties(ids);
+
                 const props = new Set();
                 selectionData.forEach(obj => {
-                    // On scanne les propriétés racines
+                    // On cherche dans les propriétés de base
                     if(obj.properties) Object.keys(obj.properties).forEach(p => props.add(p));
-                    // On scanne les PropertySets (IFC/Revit)
+                    // On cherche dans les jeux de propriétés (IFC, Tekla, Revit)
                     if(obj.propertySets) {
                         obj.propertySets.forEach(ps => {
                             if(ps.properties) Object.keys(ps.properties).forEach(p => props.add(p));
@@ -85,13 +87,15 @@
                     btn.style.backgroundColor = "#107c10";
                     status.innerText = "✅ " + selectionData.length + " objets analysés.";
                 } else {
-                    btn.innerText = "⚠️ DONNÉES VIDES";
-                    status.innerText = "Objets trouvés, mais sans propriétés BIM lisibles.";
+                    btn.innerText = "⚠️ AUCUNE DONNÉE";
+                    status.innerText = "Objets trouvés, mais pas de propriétés BIM lisibles.";
                     btn.style.backgroundColor = "#666";
                 }
             } catch (err) {
                 btn.innerText = "❌ ERREUR";
+                btn.style.backgroundColor = "#d13438";
                 status.innerText = "Détail : " + err.message;
+                console.error("Détail erreur:", err);
             }
         };
 
@@ -118,11 +122,13 @@
                 div.className = "row";
                 div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v} (${groups[v].length})</span>`;
                 div.querySelector('input').onchange = (ev) => {
+                    // Utilisation du module VIEW pour masquer/afficher
                     API.view.setObjectVisibility(groups[v], ev.target.checked);
                 };
                 res.appendChild(div);
             });
         };
+
         init();
     </script>
 </body>
