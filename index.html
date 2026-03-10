@@ -6,55 +6,72 @@
     <style>
         body { font-family: sans-serif; padding: 15px; background: #f4f4f4; }
         .card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        button { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        button:disabled { background: #ccc; cursor: not-allowed; }
+        #btn-scan { width: 100%; padding: 12px; background: #ccc; color: white; border: none; border-radius: 4px; cursor: not-allowed; font-weight: bold; }
+        .ready { background: #0078d4 !important; cursor: pointer !important; }
         select { width: 100%; padding: 10px; margin-top: 10px; }
-        .layer-item { display: flex; align-items: center; background: white; margin-top: 5px; padding: 8px; border-radius: 4px; border-left: 5px solid #0078d4; }
+        .layer-item { display: flex; align-items: center; background: white; margin-top: 5px; padding: 8px; border-radius: 4px; border-left: 5px solid #0078d4; font-size: 13px; }
         .count { margin-left: auto; color: #888; font-size: 0.8em; }
     </style>
 </head>
 <body>
 
     <div class="card">
-        <strong>1. Sélectionnez des objets dans la vue 3D</strong>
-        <button id="btn-scan" disabled style="margin-top:10px;">Initialisation...</button>
+        <strong>Filtre de Propriétés</strong>
+        <button id="btn-scan">Attente de Trimble...</button>
         
-        <div id="ui-choix" style="display:none; margin-top:15px; border-top: 1px solid #eee; pt:10px;">
-            <strong>2. Paramètre trouvé :</strong>
+        <div id="ui-choix" style="display:none; margin-top:15px; border-top: 1px solid #eee; padding-top:10px;">
+            <strong>Paramètre :</strong>
             <select id="prop-selector"></select>
         </div>
     </div>
 
-    <div id="status" style="font-size: 12px; margin: 10px 0; color: #666;">Connexion à Trimble...</div>
+    <div id="status" style="font-size: 11px; margin: 10px 0; color: #d40000;">Vérification de l'API...</div>
     <div id="layers-list"></div>
 
     <script>
         let api = null;
         let selectionProps = [];
+        const btn = document.getElementById('btn-scan');
+        const status = document.getElementById('status');
 
-        async function init() {
+        // Fonction pour essayer de se connecter
+        async function connectWithRetry() {
             try {
-                // Tentative de connexion
+                // On vérifie si la bibliothèque est bien chargée dans la page
+                if (typeof TrimbleConnectWorkspace === 'undefined') {
+                    status.innerText = "Erreur : La bibliothèque Trimble n'est pas chargée. Vérifiez votre connexion internet.";
+                    return;
+                }
+
                 api = await TrimbleConnectWorkspace.connect();
-                document.getElementById('btn-scan').disabled = false;
-                document.getElementById('btn-scan').innerText = "Scanner la sélection";
-                document.getElementById('status').innerText = "Prêt : Sélectionnez des objets et cliquez sur le bouton.";
+                
+                if (api && api.ui) {
+                    btn.innerText = "Scanner la sélection";
+                    btn.className = "ready";
+                    btn.disabled = false;
+                    status.innerText = "Connecté avec succès !";
+                    status.style.color = "green";
+                } else {
+                    throw new Error("API connectée mais module 'ui' absent.");
+                }
             } catch (e) {
-                document.getElementById('status').innerText = "Erreur de connexion : " + e.message;
+                status.innerText = "Tentative de reconnexion... " + e.message;
+                setTimeout(connectWithRetry, 2000); // Réessaie toutes les 2 secondes
             }
         }
 
-        document.getElementById('btn-scan').onclick = async () => {
-            if (!api) return; // Sécurité supplémentaire
-
-            const status = document.getElementById('status');
-            status.innerText = "Lecture de la sélection...";
+        btn.onclick = async () => {
+            if (!api || !api.ui) return;
+            
+            status.innerText = "Lecture des objets sélectionnés...";
+            status.style.color = "#666";
             
             try {
                 const selIds = await api.ui.getSelection();
                 
-                if (selIds.length === 0) {
-                    status.innerText = "⚠️ Sélectionnez d'abord des objets dans la vue 3D !";
+                if (!selIds || selIds.length === 0) {
+                    status.innerText = "⚠️ Sélectionnez au moins un objet dans la maquette 3D.";
+                    status.style.color = "orange";
                     return;
                 }
 
@@ -79,9 +96,9 @@
                 });
 
                 document.getElementById('ui-choix').style.display = "block";
-                status.innerText = selIds.length + " objets analysés avec succès.";
+                status.innerText = selIds.length + " objets prêts.";
             } catch (e) {
-                status.innerText = "Erreur : " + e.message;
+                status.innerText = "Erreur lors du scan : " + e.message;
             }
         };
 
@@ -89,7 +106,7 @@
             const prop = e.target.value;
             const container = document.getElementById('layers-list');
             container.innerHTML = "";
-            if (!prop) return;
+            if (!prop || !api.visual) return;
 
             const groups = {};
             selectionProps.forEach(obj => {
@@ -111,8 +128,7 @@
             });
         };
 
-        // Lancement de l'initialisation
-        init();
+        connectWithRetry();
     </script>
 </body>
 </html>
