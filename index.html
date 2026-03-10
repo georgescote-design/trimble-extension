@@ -2,143 +2,93 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Filtre BIM Direct</title>
+    <title>Filtre BIM - Trimble API</title>
+    <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; padding: 15px; background: #fff; text-align: center; }
-        .card { border: 2px solid #0078d4; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        h3 { color: #0078d4; margin-top: 0; }
-        button { width: 100%; padding: 14px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 12px; font-size: 14px; }
-        button:hover { background: #005a9e; }
-        #status { font-size: 15px; color: #d13438; margin-bottom: 15px; font-weight: bold; padding: 10px; border-radius: 4px; background: #f3f2f1; }
-        select { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; }
-        .layer-row { text-align: left; padding: 8px; border-bottom: 1px solid #eee; display: flex; align-items: center; font-size: 13px; }
-        input[type="checkbox"] { margin-right: 10px; width: 18px; height: 18px; }
+        body { font-family: sans-serif; padding: 15px; background: white; }
+        .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        button { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
+        #status { font-size: 13px; color: #0078d4; margin-bottom: 10px; text-align: center; }
+        select { width: 100%; padding: 8px; margin-bottom: 10px; }
+        .row { display: flex; align-items: center; padding: 5px; border-bottom: 1px solid #eee; font-size: 13px; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h3>Générateur de Calques</h3>
-        <div id="status">🔴 État : Non Connecté</div>
+        <h3>Filtre Intelligent</h3>
+        <div id="status">🔄 Connexion au Parent...</div>
         
-        <button id="btn-connect">1. ACTIVER L'EXTENSION</button>
-        
-        <div id="ui-main" style="display:none;">
-            <button id="btn-scan" style="background: #107c10;">2. SCANNER LA SÉLECTION</button>
-            <div style="font-size: 11px; color: #666; margin-bottom: 5px;">3. Filtrer par paramètre :</div>
+        <div id="ui" style="display:none;">
+            <button id="btn-scan">SCANNER LA SÉLECTION</button>
             <select id="prop-selector"></select>
-            <div id="layers"></div>
+            <div id="results"></div>
         </div>
     </div>
 
 <script>
-    // API ULTRA-SIMPLIFIÉE ET RÉSISTANTE
-    const TrimbleAPI = {
-        connect: () => new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => reject("Délai dépassé"), 5000);
-            const handler = e => {
-                if (e.data && e.data.method === "connected") {
-                    clearTimeout(timeout);
-                    window.removeEventListener("message", handler);
-                    let rid = 0; const cbs = {};
-                    window.addEventListener("message", ev => {
-                        if (ev.data && ev.data.callbackId) {
-                            const cb = cbs[ev.data.callbackId];
-                            if (cb) { delete cbs[ev.data.callbackId]; cb(ev.data.data); }
-                        }
-                    });
-                    const req = (m, p) => {
-                        const id = ++rid;
-                        return new Promise(res => {
-                            cbs[id] = res;
-                            window.parent.postMessage({method: m, params: p, callbackId: id}, "*");
-                        });
-                    };
-                    resolve({
-                        getSelection: () => req("ui.getSelection"),
-                        getProps: (ids) => req("project.getProperties", {objectIds: ids}),
-                        setVis: (ids, v) => req("visual.setObjectVisibility", {objectIds: ids, visible: v})
-                    });
-                }
-            };
-            window.addEventListener("message", handler);
-            window.parent.postMessage({method: "connect"}, "*");
-        })
-    };
+    let API, selectionData = [];
 
-    let api, selectionData = [];
-
-    // CLIC SUR BOUTON 1
-    document.getElementById('btn-connect').onclick = async () => {
+    async function init() {
         const status = document.getElementById('status');
-        status.innerText = "⏳ Tentative de connexion...";
         try {
-            api = await TrimbleAPI.connect();
-            status.innerText = "✅ ÉTAT : CONNECTÉ !";
-            status.style.color = "#107c10";
-            document.getElementById('btn-connect').style.display = "none";
-            document.getElementById('ui-main').style.display = "block";
+            // Utilisation exacte de la syntaxe du helpfile
+            // On se connecte au "window.parent"
+            API = await TrimbleConnectWorkspace.connect(window.parent, (event, data) => {
+                console.log("Événement Trimble:", event, data);
+            });
+
+            status.innerText = "✅ Connecté à Trimble";
+            document.getElementById('ui').style.display = "block";
         } catch (e) {
-            status.innerText = "❌ ÉCHEC. Cliquez encore ou rafraîchissez F5.";
+            status.innerText = "❌ Échec de connexion au Parent";
             console.error(e);
         }
-    };
+    }
 
-    // CLIC SUR BOUTON 2
     document.getElementById('btn-scan').onclick = async () => {
-        const status = document.getElementById('status');
-        status.innerText = "⏳ Analyse de la maquette...";
-        const ids = await api.getSelection();
+        const ids = await API.ui.getSelection();
+        if (!ids || ids.length === 0) return alert("Sélectionnez des objets !");
         
-        if (!ids || ids.length === 0) {
-            status.innerText = "⚠️ Sélectionnez des objets en 3D !";
-            return;
-        }
+        // On récupère les propriétés (ProjectAPI)
+        selectionData = await API.project.getProperties(ids);
         
-        selectionData = await api.getProps(ids);
         const props = new Set();
         selectionData.forEach(o => {
             if(o.properties) Object.keys(o.properties).forEach(p => props.add(p));
-            if(o.propertySets) o.propertySets.forEach(ps => { 
-                if(ps.properties) Object.keys(ps.properties).forEach(p => props.add(p)); 
+            if(o.propertySets) o.propertySets.forEach(ps => {
+                if(ps.properties) Object.keys(ps.properties).forEach(p => props.add(p));
             });
         });
 
         const sel = document.getElementById('prop-selector');
         sel.innerHTML = '<option value="">-- Choisir un paramètre --</option>';
-        Array.from(props).sort().forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p; opt.innerText = p;
-            sel.appendChild(opt);
-        });
-        status.innerText = "🔍 " + ids.length + " objets prêts.";
+        Array.from(props).sort().forEach(p => sel.innerHTML += `<option value="${p}">${p}</option>`);
     };
 
-    // CHANGEMENT DE PARAMÈTRE
     document.getElementById('prop-selector').onchange = (e) => {
         const p = e.target.value;
-        const layers = document.getElementById('layers');
-        layers.innerHTML = "";
-        if(!p) return;
-        
+        const res = document.getElementById('results');
+        res.innerHTML = "";
         const groups = {};
+
         selectionData.forEach(o => {
-            let v = "Inconnu/N-A";
+            let v = "N/A";
             if(o.properties && o.properties[p]) v = o.properties[p];
-            else if(o.propertySets) {
-                o.propertySets.forEach(ps => { if(ps.properties && ps.properties[p]) v = ps.properties[p]; });
-            }
+            else if(o.propertySets) o.propertySets.forEach(ps => { if(ps.properties && ps.properties[p]) v = ps.properties[p]; });
             if(!groups[v]) groups[v] = [];
             groups[v].push(o.id);
         });
 
         Object.keys(groups).sort().forEach(v => {
             const div = document.createElement('div');
-            div.className = "layer-row";
+            div.className = "row";
             div.innerHTML = `<input type="checkbox" checked> <span>${v} (${groups[v].length})</span>`;
-            div.querySelector('input').onchange = (ev) => api.setVis(groups[v], ev.target.checked);
-            layers.appendChild(div);
+            div.querySelector('input').onchange = (ev) => API.visual.setObjectVisibility(groups[v], ev.target.checked);
+            res.appendChild(div);
         });
     };
+
+    init();
 </script>
 </body>
 </html>
