@@ -2,33 +2,38 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta name="referrer" content="no-referrer-when-downgrade">
     <script src="https://connect-extensions.trimble.com/js/trimble.connect.workspace.api.js"></script>
 </head>
-<body style="background: white; padding: 20px;">
+<body style="background: white; padding: 20px; border: 5px solid red;">
 
-    <h2 id="titre">🔄 Phase de test</h2>
-    <p id="info">Si vous lisez ceci, le fichier est chargé.</p>
-    <button id="btn-test" style="display:none; padding: 10px; background: green; color: white;">Scanner la sélection</button>
+    <h2 id="titre">Test de Connexion Directe</h2>
+    <p id="status">Statut : En attente du signal Trimble...</p>
+    <button id="btn-action" style="display:none; padding:15px; background:blue; color:white;">Scanner</button>
 
     <script>
-        async function connect() {
-            const info = document.getElementById('info');
+        // On essaie de se connecter immédiatement et de force
+        async function start() {
+            const status = document.getElementById('status');
             try {
-                // On vérifie si Trimble répond
+                // On force l'API à se réveiller
                 const api = await TrimbleConnectWorkspace.connect();
-                info.innerText = "✅ BRAVO ! La connexion fonctionne.";
-                document.getElementById('btn-test').style.display = "block";
+                status.innerHTML = "<b style='color:green'>ENFIN CONNECTÉ !</b>";
+                document.body.style.borderColor = "green";
+                document.getElementById('btn-action').style.display = "block";
                 
-                document.getElementById('btn-test').onclick = async () => {
+                document.getElementById('btn-action').onclick = async () => {
                     const sel = await api.ui.getSelection();
-                    alert("Objets sélectionnés : " + sel.length);
+                    alert("Succès ! Objets sélectionnés : " + sel.length);
                 };
-            } catch (e) {
-                info.innerText = "Attente de Trimble... (Vérifiez les cookies tiers)";
+            } catch (err) {
+                status.innerText = "Trimble ne répond pas. Erreur : " + err.message;
             }
         }
-        window.onload = connect;
+
+        // On lance le test
+        start();
+        // Et on relance après 3 secondes au cas où
+        setTimeout(start, 3000);
     </script>
 </body>
 </html>
