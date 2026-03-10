@@ -32,70 +32,70 @@
         async function init() {
             try {
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-                // Demande la permission d'accès aux données du projet
                 if(API.extension && API.extension.requestPermission) {
                     await API.extension.requestPermission("accesstoken");
                 }
-            } catch (e) { console.error("Erreur init:", e); }
+            } catch (e) { console.error(e); }
         }
 
         document.getElementById('btn-scan').onclick = async function() {
             const btn = this;
             const status = document.getElementById('status');
-            btn.innerText = "⏳ ANALYSE...";
+            btn.innerText = "⏳ ANALYSE EN COURS...";
             btn.style.backgroundColor = "#ff9800";
 
             try {
-                // 1. Récupérer les IDs de ce qui est sélectionné (Module VIEWER)
+                // 1. On récupère les IDs sélectionnés
                 const ids = await API.viewer.getSelection();
                 
                 if (!ids || ids.length === 0) {
-                    status.innerText = "⚠️ RIEN N'EST SÉLECTIONNÉ DANS LA VUE 3D";
+                    status.innerText = "⚠️ RIEN N'EST SÉLECTIONNÉ";
                     btn.innerText = "SCANNER LA SÉLECTION";
                     btn.style.backgroundColor = "#0078d4";
                     return;
                 }
 
-                status.innerText = "Lecture de " + ids.length + " objets...";
+                status.innerText = "Récupération des données de " + ids.length + " objets...";
 
-                // 2. RÉCUPÉRATION DES PROPRIÉTÉS (La commande exacte est getObjectProperties)
-                // On utilise le module VIEWER car c'est lui qui est visible dans ton projet
-                selectionData = await API.viewer.getObjectProperties(ids);
+                // 2. TENTATIVE DE RÉCUPÉRATION (On teste Project d'abord, puis Viewer)
+                try {
+                    selectionData = await API.project.getProperties(ids);
+                } catch(e) {
+                    selectionData = await API.viewer.getObjectProperties(ids);
+                }
 
                 const props = new Set();
                 selectionData.forEach(obj => {
-                    // On cherche dans les propriétés de base
+                    // On scanne absolument tout ce qui ressemble à une clé de propriété
                     if(obj.properties) Object.keys(obj.properties).forEach(p => props.add(p));
-                    // On cherche dans les jeux de propriétés (IFC, Tekla, Revit)
                     if(obj.propertySets) {
                         obj.propertySets.forEach(ps => {
                             if(ps.properties) Object.keys(ps.properties).forEach(p => props.add(p));
                         });
                     }
+                    // Certains fichiers Tekla/IFC mettent les infos ici :
+                    if(obj.attributes) Object.keys(obj.attributes).forEach(p => props.add(p));
                 });
 
                 const sel = document.getElementById('prop-selector');
                 if (props.size > 0) {
                     sel.innerHTML = '<option value="">-- ' + props.size + ' Paramètres trouvés --</option>';
                     Array.from(props).sort().forEach(p => {
-                        const opt = document.createElement('option');
-                        opt.value = p; opt.innerText = p;
-                        sel.appendChild(opt);
+                        sel.innerHTML += `<option value="${p}">${p}</option>`;
                     });
                     document.getElementById('ui-filter').style.display = "block";
                     btn.innerText = "✅ SCAN RÉUSSI";
                     btn.style.backgroundColor = "#107c10";
-                    status.innerText = "✅ " + selectionData.length + " objets analysés.";
+                    status.innerText = "✅ " + ids.length + " objets analysés.";
                 } else {
-                    btn.innerText = "⚠️ AUCUNE DONNÉE";
-                    status.innerText = "Objets trouvés, mais pas de propriétés BIM lisibles.";
+                    btn.innerText = "⚠️ DONNÉES INVISIBLES";
+                    status.innerText = "Les IDs sont reçus, mais les valeurs sont protégées ou vides.";
                     btn.style.backgroundColor = "#666";
                 }
             } catch (err) {
                 btn.innerText = "❌ ERREUR";
                 btn.style.backgroundColor = "#d13438";
                 status.innerText = "Détail : " + err.message;
-                console.error("Détail erreur:", err);
             }
         };
 
@@ -107,7 +107,9 @@
 
             selectionData.forEach(o => {
                 let v = "Inconnu";
+                // On cherche la valeur dans tous les tiroirs possibles
                 if(o.properties && o.properties[p] !== undefined) v = o.properties[p];
+                else if(o.attributes && o.attributes[p] !== undefined) v = o.attributes[p];
                 else if(o.propertySets) {
                     o.propertySets.forEach(ps => { 
                         if(ps.properties && ps.properties[p] !== undefined) v = ps.properties[p]; 
@@ -122,13 +124,11 @@
                 div.className = "row";
                 div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v} (${groups[v].length})</span>`;
                 div.querySelector('input').onchange = (ev) => {
-                    // Utilisation du module VIEW pour masquer/afficher
                     API.view.setObjectVisibility(groups[v], ev.target.checked);
                 };
                 res.appendChild(div);
             });
         };
-
         init();
     </script>
 </body>
