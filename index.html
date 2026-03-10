@@ -36,23 +36,15 @@
 
         async function init() {
             const status = document.getElementById('status');
-            if (typeof TrimbleConnectWorkspace === 'undefined') {
-                status.innerHTML = "<span style='color:red'>⚠️ Script API non chargé</span>";
-                return;
-            }
-
             try {
-                // Connexion officielle
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-                
-                // DEMANDE D'AUTORISATION (Crucial pour éviter l'erreur au scan)
+                // Demande de permission pour les données
                 await API.extension.requestPermission("accesstoken");
                 
                 status.innerHTML = "✅ <span style='color:green'>SYSTÈME PRÊT</span>";
                 document.getElementById('ui-area').classList.remove('hidden');
             } catch (e) {
                 status.innerText = "⚠️ Erreur de connexion";
-                console.error(e);
             }
         }
 
@@ -61,10 +53,12 @@
             const status = document.getElementById('status');
             
             btn.innerText = "⏳ ANALYSE...";
-            btn.style.background = "#ff9800"; // Orange
+            btn.style.background = "#ff9800";
 
             try {
-                const ids = await API.ui.getSelection();
+                // CORRECTION : On utilise la commande selection.get() au lieu de ui.getSelection()
+                const ids = await API.selection.get();
+                
                 if (!ids || ids.length === 0) {
                     status.innerText = "⚠️ Sélectionnez un objet d'abord !";
                     btn.innerText = "SCANNER LA SÉLECTION";
@@ -72,7 +66,6 @@
                     return;
                 }
 
-                // Récupération des propriétés
                 selectionData = await API.project.getProperties(ids);
                 
                 const props = new Set();
@@ -92,13 +85,12 @@
                 });
 
                 btn.innerText = "✅ SCAN TERMINÉ";
-                btn.style.background = "#107c10"; // Vert
+                btn.style.background = "#107c10";
                 status.innerText = "✅ Données récupérées";
             } catch (err) {
                 btn.innerText = "❌ ERREUR";
-                btn.style.background = "#d13438"; // Rouge
+                btn.style.background = "#d13438";
                 status.innerText = "Erreur: " + err.message;
-                console.error(err);
             }
         };
 
@@ -113,6 +105,7 @@
                 let v = "Inconnu";
                 if(o.properties && o.properties[p]) v = o.properties[p];
                 else if(o.propertySets) o.propertySets.forEach(ps => { if(ps.properties && ps.properties[p]) v = ps.properties[p]; });
+                if(!groups[v]) groups[val] = []; // Correction mineure ici aussi
                 if(!groups[v]) groups[v] = [];
                 groups[v].push(o.id);
             });
