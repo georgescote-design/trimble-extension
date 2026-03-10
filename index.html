@@ -2,129 +2,33 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <script src="https://trimble-connect.github.io/connect-workspace-api/js/trimble.connect.workspace.api.js"></script>
-    <style>
-        body { font-family: sans-serif; padding: 15px; background: #f4f4f4; }
-        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
-        #main-ui { display: none; } /* Caché par défaut */
-        button { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 10px; }
-        select { width: 100%; padding: 10px; margin-top: 10px; }
-        .layer-item { display: flex; align-items: center; background: white; margin-top: 5px; padding: 8px; border-radius: 4px; border-left: 5px solid #0078d4; text-align: left; }
-        .count { margin-left: auto; color: #888; font-size: 0.8em; }
-        #loader { color: #666; font-style: italic; }
-    </style>
+    <meta name="referrer" content="no-referrer-when-downgrade">
+    <script src="https://connect-extensions.trimble.com/js/trimble.connect.workspace.api.js"></script>
 </head>
-<body>
+<body style="background: white; padding: 20px;">
 
-    <div class="card">
-        <div id="loader">🔄 Connexion à Trimble Connect en cours...</div>
-        
-        <div id="main-ui">
-            <strong>1. Sélectionnez des objets en 3D</strong>
-            <button id="btn-scan">Scanner la sélection</button>
-            
-            <div id="ui-choix" style="display:none; margin-top:15px; border-top: 1px solid #eee; padding-top:10px;">
-                <strong>2. Choisir un paramètre :</strong>
-                <select id="prop-selector"></select>
-            </div>
-        </div>
-    </div>
-
-    <div id="status" style="font-size: 12px; margin: 10px 0; color: #666; text-align: center;"></div>
-    <div id="layers-list"></div>
+    <h2 id="titre">🔄 Phase de test</h2>
+    <p id="info">Si vous lisez ceci, le fichier est chargé.</p>
+    <button id="btn-test" style="display:none; padding: 10px; background: green; color: white;">Scanner la sélection</button>
 
     <script>
-        let api = null;
-        let selectionProps = [];
-
-        // Fonction d'initialisation automatique
-        async function start() {
+        async function connect() {
+            const info = document.getElementById('info');
             try {
-                // On attend que la bibliothèque soit chargée
-                if (typeof TrimbleConnectWorkspace === 'undefined') {
-                    setTimeout(start, 500);
-                    return;
-                }
+                // On vérifie si Trimble répond
+                const api = await TrimbleConnectWorkspace.connect();
+                info.innerText = "✅ BRAVO ! La connexion fonctionne.";
+                document.getElementById('btn-test').style.display = "block";
                 
-                api = await TrimbleConnectWorkspace.connect();
-                
-                // Si on arrive ici, l'API est prête
-                document.getElementById('loader').style.display = "none";
-                document.getElementById('main-ui').style.display = "block";
-                document.getElementById('status').innerText = "✅ Connecté. Prêt à scanner.";
+                document.getElementById('btn-test').onclick = async () => {
+                    const sel = await api.ui.getSelection();
+                    alert("Objets sélectionnés : " + sel.length);
+                };
             } catch (e) {
-                document.getElementById('status').innerText = "Attente de connexion...";
-                setTimeout(start, 1000);
+                info.innerText = "Attente de Trimble... (Vérifiez les cookies tiers)";
             }
         }
-
-        document.getElementById('btn-scan').onclick = async () => {
-            if (!api || !api.ui) return;
-            const status = document.getElementById('status');
-            status.innerText = "Lecture des données...";
-            
-            try {
-                const selIds = await api.ui.getSelection();
-                if (!selIds || selIds.length === 0) {
-                    status.innerText = "⚠️ Sélectionnez des objets d'abord !";
-                    return;
-                }
-
-                selectionProps = await api.project.getProperties(selIds);
-                const uniqueNames = new Set();
-
-                selectionProps.forEach(obj => {
-                    if (obj.properties) Object.keys(obj.properties).forEach(n => uniqueNames.add(n));
-                    if (obj.propertySets) {
-                        obj.propertySets.forEach(ps => {
-                            if (ps.properties) Object.keys(ps.properties).forEach(n => uniqueNames.add(n));
-                        });
-                    }
-                });
-
-                const selector = document.getElementById('prop-selector');
-                selector.innerHTML = '<option value="">-- Choisir --</option>';
-                Array.from(uniqueNames).sort().forEach(n => {
-                    const opt = document.createElement('option');
-                    opt.value = n; opt.innerText = n;
-                    selector.appendChild(opt);
-                });
-
-                document.getElementById('ui-choix').style.display = "block";
-                status.innerText = selIds.length + " objets analysés.";
-            } catch (e) {
-                status.innerText = "Erreur : " + e.message;
-            }
-        };
-
-        document.getElementById('prop-selector').onchange = (e) => {
-            const prop = e.target.value;
-            const container = document.getElementById('layers-list');
-            container.innerHTML = "";
-            if (!prop) return;
-
-            const groups = {};
-            selectionProps.forEach(obj => {
-                let val = "Non défini";
-                if (obj.properties && obj.properties[prop]) val = obj.properties[prop];
-                else if (obj.propertySets) {
-                    obj.propertySets.forEach(ps => { if(ps.properties && ps.properties[prop]) val = ps.properties[prop]; });
-                }
-                if (!groups[val]) groups[val] = [];
-                groups[val].push(obj.id);
-            });
-
-            Object.keys(groups).sort().forEach(v => {
-                const item = document.createElement('div');
-                item.className = 'layer-item';
-                item.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v}</span> <span class="count">${groups[v].length}</span>`;
-                item.querySelector('input').onchange = (ev) => api.visual.setObjectVisibility(groups[v], ev.target.checked);
-                container.appendChild(item);
-            });
-        };
-
-        start();
+        window.onload = connect;
     </script>
 </body>
 </html>
-
