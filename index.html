@@ -12,7 +12,7 @@
             width: 100%; padding: 12px; background: #0078d4; color: white; 
             border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px;
         }
-        #status { font-size: 13px; color: #0078d4; margin-bottom: 10px; text-align: center; font-weight: bold; }
+        #status { font-size: 13px; color: #0078d4; margin-bottom: 10px; text-align: center; font-weight: bold; min-height: 20px;}
         select { width: 100%; margin-top: 10px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
         .row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 13px; }
         .hidden { display: none; }
@@ -38,9 +38,10 @@
             const status = document.getElementById('status');
             try {
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-                // Demande de permission pour les données
-                await API.extension.requestPermission("accesstoken");
-                
+                // Demande de permission
+                if(API.extension && API.extension.requestPermission) {
+                    await API.extension.requestPermission("accesstoken");
+                }
                 status.innerHTML = "✅ <span style='color:green'>SYSTÈME PRÊT</span>";
                 document.getElementById('ui-area').classList.remove('hidden');
             } catch (e) {
@@ -51,14 +52,21 @@
         document.getElementById('btn-scan').onclick = async function() {
             const btn = this;
             const status = document.getElementById('status');
-            
             btn.innerText = "⏳ ANALYSE...";
             btn.style.background = "#ff9800";
 
             try {
-                // CORRECTION : On utilise la commande selection.get() au lieu de ui.getSelection()
-                const ids = await API.selection.get();
+                let ids = [];
                 
+                // TEST DES DIFFÉRENTES MÉTHODES DE SÉLECTION (Auto-détection)
+                if (API.ui && typeof API.ui.getSelection === "function") {
+                    ids = await API.ui.getSelection();
+                } else if (API.selection && typeof API.selection.get === "function") {
+                    ids = await API.selection.get();
+                } else {
+                    throw new Error("Méthode de sélection introuvable sur cette version d'API.");
+                }
+
                 if (!ids || ids.length === 0) {
                     status.innerText = "⚠️ Sélectionnez un objet d'abord !";
                     btn.innerText = "SCANNER LA SÉLECTION";
@@ -86,11 +94,12 @@
 
                 btn.innerText = "✅ SCAN TERMINÉ";
                 btn.style.background = "#107c10";
-                status.innerText = "✅ Données récupérées";
+                status.innerText = "✅ " + ids.length + " objets analysés";
             } catch (err) {
                 btn.innerText = "❌ ERREUR";
                 btn.style.background = "#d13438";
-                status.innerText = "Erreur: " + err.message;
+                status.innerText = err.message;
+                console.error("Détails de l'erreur:", err);
             }
         };
 
@@ -104,8 +113,9 @@
             selectionData.forEach(o => {
                 let v = "Inconnu";
                 if(o.properties && o.properties[p]) v = o.properties[p];
-                else if(o.propertySets) o.propertySets.forEach(ps => { if(ps.properties && ps.properties[p]) v = ps.properties[p]; });
-                if(!groups[v]) groups[val] = []; // Correction mineure ici aussi
+                else if(o.propertySets) {
+                    o.propertySets.forEach(ps => { if(ps.properties && ps.properties[p]) v = ps.properties[p]; });
+                }
                 if(!groups[v]) groups[v] = [];
                 groups[v].push(o.id);
             });
