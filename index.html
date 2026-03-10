@@ -2,77 +2,120 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Mon Filtre Trimble</title>
+    <title>BIM Layer Shuffler</title>
     <script src="https://connect-extensions.trimble.com/js/trimble.connect.workspace.api.js"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; padding: 15px; background: #f4f4f4; }
-        .card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        input, select, button { width: 100%; padding: 10px; margin-top: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        button { background: #0078d4; color: white; font-weight: bold; cursor: pointer; border: none; }
-        button:hover { background: #005a9e; }
-        .layer-item { display: flex; align-items: center; background: white; margin-top: 5px; padding: 8px; border-radius: 4px; font-size: 13px; }
-        .count { margin-left: auto; color: #888; font-size: 11px; }
+        body { font-family: 'Segoe UI', sans-serif; padding: 15px; background: #f9f9f9; }
+        .card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        select, button { width: 100%; padding: 12px; margin-top: 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px; }
+        button { background: #0078d4; color: white; border: none; font-weight: bold; cursor: pointer; }
+        button:disabled { background: #ccc; }
+        .layer-item { display: flex; align-items: center; background: white; margin-top: 4px; padding: 10px; border-radius: 6px; border: 1px solid #eee; font-size: 13px; }
+        .count { margin-left: auto; background: #eee; padding: 2px 6px; border-radius: 10px; font-size: 11px; }
     </style>
 </head>
 <body>
+
     <div class="card">
-        <strong>Nom de la propriété à filtrer :</strong>
-        <input type="text" id="propName" placeholder="ex: Phase, Statut, Lot...">
-        <button id="btn-run">Générer les Calques</button>
+        <strong>1. Charger les propriétés du modèle</strong>
+        <button id="btn-load-props">Scanner les propriétés disponibles</button>
+        
+        <div id="select-container" style="display:none; margin-top:15px;">
+            <strong>2. Choisir le paramètre :</strong>
+            <select id="prop-selector"></select>
+        </div>
     </div>
-    <div id="status" style="font-size: 12px; color: #666; margin-top: 10px;"></div>
-    <div id="layers-container"></div>
+
+    <div id="status" style="font-size: 12px; color: #666; margin-bottom: 10px;"></div>
+    <div id="layers-list"></div>
 
     <script>
         let api;
+        let allObjectProps = [];
 
         async function init() {
             api = await TrimbleConnectWorkspace.connect();
         }
 
-        document.getElementById('btn-run').onclick = async () => {
-            const targetProp = document.getElementById('propName').value;
+        // ÉTAPE 1 : Scanner le modèle pour trouver TOUS les noms de propriétés
+        document.getElementById('btn-load-props').onclick = async () => {
             const status = document.getElementById('status');
-            const container = document.getElementById('layers-container');
+            const btn = document.getElementById('btn-load-props');
             
-            if(!targetProp) return alert("Entrez un nom de propriété");
-            
-            status.innerText = "Analyse du modèle en cours...";
-            container.innerHTML = "";
+            status.innerText = "Scan des propriétés en cours... (Patientez)";
+            btn.disabled = true;
 
             const allIds = await api.ui.getObjects();
-            const allProps = await api.project.getProperties(allIds);
+            allObjectProps = await api.project.getProperties(allIds);
             
+            const uniquePropNames = new Set();
+
+            allObjectProps.forEach(obj => {
+                // Propriétés de base
+                if (obj.properties) {
+                    Object.keys(obj.properties).forEach(name => uniquePropNames.add(name));
+                }
+                // Propriétés personnalisées (Psets)
+                if (obj.propertySets) {
+                    obj.propertySets.forEach(pset => {
+                        if (pset.properties) {
+                            Object.keys(pset.properties).forEach(name => uniquePropNames.add(name));
+                        }
+                    });
+                }
+            });
+
+            // Remplir la liste déroulante
+            const selector = document.getElementById('prop-selector');
+            selector.innerHTML = '<option value="">-- Sélectionnez un paramètre --</option>';
+            Array.from(uniquePropNames).sort().forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.innerText = name;
+                selector.appendChild(opt);
+            });
+
+            document.getElementById('select-container').style.display = "block";
+            status.innerText = uniquePropNames.size + " paramètres trouvés.";
+            btn.disabled = false;
+        };
+
+        // ÉTAPE 2 : Quand on choisit une propriété, créer les calques
+        document.getElementById('prop-selector').onchange = async (e) => {
+            const targetProp = e.target.value;
+            const container = document.getElementById('layers-list');
+            if (!targetProp) return;
+
+            container.innerHTML = "Génération des calques...";
             const groups = {};
 
-            allProps.forEach(obj => {
-                let foundVal = "Non défini";
-                // Cherche dans les propriétés de base ET les Property Sets personnalisés
+            allObjectProps.forEach(obj => {
+                let val = "Non défini";
+                
                 if (obj.properties && obj.properties[targetProp]) {
-                    foundVal = obj.properties[targetProp];
+                    val = obj.properties[targetProp];
                 } else if (obj.propertySets) {
                     obj.propertySets.forEach(pset => {
                         if (pset.properties && pset.properties[targetProp]) {
-                            foundVal = pset.properties[targetProp];
+                            val = pset.properties[targetProp];
                         }
                     });
                 }
 
-                if (!groups[foundVal]) groups[foundVal] = [];
-                groups[foundVal].push(obj.id);
+                if (!groups[val]) groups[val] = [];
+                groups[val].push(obj.id);
             });
 
-            status.innerText = Object.keys(groups).length + " groupes trouvés.";
-
-            Object.keys(groups).forEach(val => {
-                const item = document.createElement('div');
-                item.className = 'layer-item';
-                item.innerHTML = `<input type="checkbox" checked> <span>${val}</span> <span class="count">${groups[val].length} élém.</span>`;
+            container.innerHTML = "";
+            Object.keys(groups).sort().forEach(groupName => {
+                const div = document.createElement('div');
+                div.className = 'layer-item';
+                div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${groupName}</span> <span class="count">${groups[groupName].length}</span>`;
                 
-                item.querySelector('input').onchange = (e) => {
-                    api.visual.setObjectVisibility(groups[val], e.target.checked);
+                div.querySelector('input').onchange = (evt) => {
+                    api.visual.setObjectVisibility(groups[groupName], evt.target.checked);
                 };
-                container.appendChild(item);
+                container.appendChild(div);
             });
         };
 
