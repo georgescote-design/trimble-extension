@@ -7,7 +7,7 @@
     <style>
         body { font-family: sans-serif; padding: 15px; background: white; }
         .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        h3 { margin-top: 0; color: #333; }
+        h3 { margin-top: 0; color: #333; font-size: 16px; }
         #btn-scan { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
         #status { font-size: 11px; color: #666; margin-bottom: 10px; background: #f0f0f0; padding: 5px; border-radius: 3px; min-height: 20px; }
         select { width: 100%; margin-top: 10px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
@@ -16,8 +16,8 @@
 </head>
 <body>
     <div class="card">
-        <h3>Filtre de Propriétés</h3>
-        <div id="status">✅ Système prêt</div>
+        <h3>Filtre : 01_MANILA w PARAMETRIC</h3>
+        <div id="status">✅ Prêt pour le scan</div>
         <button id="btn-scan">SCANNER LA SÉLECTION</button>
         <div id="ui-filter" style="display:none;">
             <select id="prop-selector" style="margin-top:15px;"></select>
@@ -28,6 +28,8 @@
     <script>
         let API = null;
         let selectionData = [];
+        // Nom exact du groupe cible
+        const TARGET_SET = "01_MANILA w PARAMETRIC";
 
         async function init() {
             try {
@@ -41,45 +43,38 @@
         document.getElementById('btn-scan').onclick = async function() {
             const btn = this;
             const status = document.getElementById('status');
-            btn.innerText = "⏳ ANALYSE EN COURS...";
+            btn.innerText = "⏳ LECTURE BIM...";
             btn.style.backgroundColor = "#ff9800";
 
             try {
-                // 1. On récupère les IDs sélectionnés
                 const ids = await API.viewer.getSelection();
-                
                 if (!ids || ids.length === 0) {
-                    status.innerText = "⚠️ RIEN N'EST SÉLECTIONNÉ";
+                    status.innerText = "⚠️ Sélectionnez des objets d'abord !";
                     btn.innerText = "SCANNER LA SÉLECTION";
                     btn.style.backgroundColor = "#0078d4";
                     return;
                 }
 
-                status.innerText = "Récupération des données de " + ids.length + " objets...";
-
-                // 2. TENTATIVE DE RÉCUPÉRATION (On teste Project d'abord, puis Viewer)
-                try {
-                    selectionData = await API.project.getProperties(ids);
-                } catch(e) {
-                    selectionData = await API.viewer.getObjectProperties(ids);
-                }
-
+                // On récupère les propriétés via Project (indispensable pour les PropertySets)
+                selectionData = await API.project.getProperties(ids);
                 const props = new Set();
+
                 selectionData.forEach(obj => {
-                    // On scanne absolument tout ce qui ressemble à une clé de propriété
-                    if(obj.properties) Object.keys(obj.properties).forEach(p => props.add(p));
-                    if(obj.propertySets) {
+                    if (obj.propertySets) {
                         obj.propertySets.forEach(ps => {
-                            if(ps.properties) Object.keys(ps.properties).forEach(p => props.add(p));
+                            // On compare le nom en ignorant la casse et les espaces superflus
+                            if (ps.name && ps.name.trim() === TARGET_SET && ps.properties) {
+                                Object.keys(ps.properties).forEach(k => props.add(k));
+                            }
                         });
                     }
-                    // Certains fichiers Tekla/IFC mettent les infos ici :
-                    if(obj.attributes) Object.keys(obj.attributes).forEach(p => props.add(p));
+                    // Sécurité : scan racine si le set spécifique n'est pas trouvé
+                    if (obj.properties) Object.keys(obj.properties).forEach(k => props.add(k));
                 });
 
                 const sel = document.getElementById('prop-selector');
                 if (props.size > 0) {
-                    sel.innerHTML = '<option value="">-- ' + props.size + ' Paramètres trouvés --</option>';
+                    sel.innerHTML = '<option value="">-- ' + props.size + ' Paramètres détectés --</option>';
                     Array.from(props).sort().forEach(p => {
                         sel.innerHTML += `<option value="${p}">${p}</option>`;
                     });
@@ -88,13 +83,12 @@
                     btn.style.backgroundColor = "#107c10";
                     status.innerText = "✅ " + ids.length + " objets analysés.";
                 } else {
-                    btn.innerText = "⚠️ DONNÉES INVISIBLES";
-                    status.innerText = "Les IDs sont reçus, mais les valeurs sont protégées ou vides.";
+                    btn.innerText = "⚠️ DONNÉES INTROUVABLES";
+                    status.innerText = "Le groupe '" + TARGET_SET + "' n'est pas présent dans les données reçues.";
                     btn.style.backgroundColor = "#666";
                 }
             } catch (err) {
                 btn.innerText = "❌ ERREUR";
-                btn.style.backgroundColor = "#d13438";
                 status.innerText = "Détail : " + err.message;
             }
         };
@@ -107,13 +101,15 @@
 
             selectionData.forEach(o => {
                 let v = "Inconnu";
-                // On cherche la valeur dans tous les tiroirs possibles
-                if(o.properties && o.properties[p] !== undefined) v = o.properties[p];
-                else if(o.attributes && o.attributes[p] !== undefined) v = o.attributes[p];
-                else if(o.propertySets) {
-                    o.propertySets.forEach(ps => { 
-                        if(ps.properties && ps.properties[p] !== undefined) v = ps.properties[p]; 
+                if (o.propertySets) {
+                    o.propertySets.forEach(ps => {
+                        if (ps.name && ps.name.trim() === TARGET_SET && ps.properties && ps.properties[p] !== undefined) {
+                            v = ps.properties[p];
+                        }
                     });
+                }
+                if (v === "Inconnu" && o.properties && o.properties[p] !== undefined) {
+                    v = o.properties[p];
                 }
                 if(!groups[v]) groups[v] = [];
                 groups[v].push(o.id);
