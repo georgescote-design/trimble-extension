@@ -2,14 +2,14 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Filtre BIM Georges - Stable</title>
+    <title>Filtre BIM Georges - Force selection</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
         body { font-family: sans-serif; padding: 15px; background: white; }
         .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         h3 { margin-top: 0; color: #333; font-size: 15px; }
         button { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        #status { font-size: 11px; color: #666; margin-bottom: 10px; background: #f0f0f0; padding: 5px; border-radius: 3px; min-height: 20px; }
+        #status { font-size: 11px; color: #666; margin-bottom: 10px; background: #f0f0f0; padding: 5px; border-radius: 3px; min-height: 20px; word-break: break-all; }
         select { width: 100%; margin-top: 15px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
         .row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 12px; }
     </style>
@@ -17,7 +17,7 @@
 <body>
     <div class="card">
         <h3>Filtre : 01_MANILA w PARAMETRIC</h3>
-        <div id="status">✅ Prêt (Pur Viewer)</div>
+        <div id="status">✅ Prêt</div>
         <button id="btn-scan">SCANNER LA SÉLECTION</button>
         <div id="ui-filter" style="display:none;">
             <select id="prop-selector" style="margin-top:10px;"></select>
@@ -33,43 +33,58 @@
         async function init() {
             try {
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-                // On ne demande pas de permission "read" ou "readwrite" car ça a causé un échec
-                // On utilise la connexion de base qui affichait "Système prêt"
-            } catch (e) { console.error("Erreur init:", e); }
+            } catch (e) { console.error(e); }
+        }
+
+        // Fonction d'extraction ultra-robuste
+        function extractIds(data) {
+            if (!data) return [];
+            // Si c'est déjà un tableau
+            if (Array.isArray(data)) {
+                return data.map(item => {
+                    if (typeof item === 'string' || typeof item === 'number') return item;
+                    return item.id || item.runtimeId || item.objectId || item.guid;
+                }).filter(id => id !== undefined);
+            }
+            // Si c'est un objet unique (certaines versions de l'API)
+            if (typeof data === 'object') {
+                const singleId = data.id || data.runtimeId || data.objectId || data.guid;
+                return singleId ? [singleId] : [];
+            }
+            return [data];
         }
 
         document.getElementById('btn-scan').onclick = async function() {
             const btn = this;
             const status = document.getElementById('status');
-            
-            if (!API || !API.viewer) {
-                status.innerText = "❌ API Viewer non disponible";
-                return;
-            }
-
-            btn.innerText = "⏳ ANALYSE BIM...";
+            btn.innerText = "⏳ RECHERCHE...";
             
             try {
-                // ÉTAPE 1 : RÉCUPÉRATION ET NETTOYAGE DES IDs (Solution au [object Object])
-                const rawSelection = await API.viewer.getSelection();
-                const ids = (rawSelection || []).map(item => {
-                    if (typeof item === 'string') return item;
-                    return item.id || item.runtimeId || item.objectId;
-                }).filter(id => id !== undefined);
+                // On demande la sélection au Viewer
+                let result = await API.viewer.getSelection();
+                
+                // On nettoie le résultat
+                let ids = extractIds(result);
+
+                // Si c'est vide, on tente un "fallback" sur le module UI (certaines configs)
+                if (ids.length === 0 && API.ui) {
+                    let uiRes = await API.ui.getSelection();
+                    ids = extractIds(uiRes);
+                }
 
                 if (ids.length === 0) {
-                    status.innerText = "⚠️ Sélectionnez l'objet AVANT de cliquer !";
+                    status.innerText = "⚠️ RIEN DÉTECTÉ. Cliquez bien sur l'objet pour qu'il soit JAUNE, puis attendez 1 sec.";
                     btn.innerText = "SCANNER LA SÉLECTION";
                     return;
                 }
 
-                // ÉTAPE 2 : RÉCUPÉRATION DES PROPRIÉTÉS (Seulement via Viewer)
-                // Commande exacte : getObjectProperties
+                status.innerText = "✅ " + ids.length + " objet(s) trouvé(s). Lecture BIM...";
+
+                // Lecture des propriétés (uniquement via Viewer)
                 selectionData = await API.viewer.getObjectProperties(ids);
                 
                 const props = new Set();
                 selectionData.forEach(obj => {
-                    // On cherche spécifiquement dans ton groupe Manila
                     if (obj.propertySets) {
                         obj.propertySets.forEach(ps => {
                             if (ps.name && ps.name.trim() === TARGET_SET && ps.properties) {
@@ -77,7 +92,6 @@
                             }
                         });
                     }
-                    // Sécurité : propriétés racines
                     if (obj.properties) Object.keys(obj.properties).forEach(k => props.add(k));
                 });
 
@@ -88,19 +102,19 @@
                     document.getElementById('ui-filter').style.display = "block";
                     btn.innerText = "✅ SCAN RÉUSSI";
                     btn.style.backgroundColor = "#107c10";
-                    status.innerText = "✅ " + ids.length + " objets prêts.";
                 } else {
                     btn.innerText = "⚠️ AUCUNE DONNÉE";
-                    status.innerText = "IDs ok, mais les valeurs Manila sont vides.";
+                    status.innerText = "Objet détecté, mais le groupe '" + TARGET_SET + "' est introuvable.";
                     btn.style.backgroundColor = "#666";
                 }
+
             } catch (err) {
                 status.innerText = "Erreur: " + err.message;
                 btn.innerText = "❌ ERREUR";
             }
         };
 
-        // FILTRAGE ET VISIBILITÉ (Correction Copilot : viewer + async)
+        // Gestion visibilité (Viewer + Async)
         document.getElementById('prop-selector').onchange = (e) => {
             const p = e.target.value;
             const res = document.getElementById('results');
@@ -120,7 +134,6 @@
                 if (v === "Inconnu" && o.properties && o.properties[p] !== undefined) v = o.properties[p];
                 
                 if(!groups[v]) groups[v] = [];
-                // On utilise runtimeId ou id pour la visibilité
                 groups[v].push(o.runtimeId || o.id);
             });
 
@@ -128,12 +141,8 @@
                 const div = document.createElement('div');
                 div.className = "row";
                 div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v} (${groups[v].length})</span>`;
-                
                 div.querySelector('input').onchange = async (ev) => {
-                    try {
-                        // Utilisation du module Viewer (Copilot)
-                        await API.viewer.setObjectVisibility(groups[v], ev.target.checked);
-                    } catch (err) { console.error("Erreur visibilité:", err); }
+                    await API.viewer.setObjectVisibility(groups[v], ev.target.checked);
                 };
                 res.appendChild(div);
             });
