@@ -11,10 +11,10 @@
         h3 { margin-top: 0; color: #2c3e50; font-size: 16px; }
         #status { font-size: 12px; padding: 8px; background: #ecf0f1; border-radius: 4px; margin-bottom: 15px; color: #34495e; }
         
-        /* La zone de Drag & Drop stylée */
-        #drop-zone { border: 2px dashed #3498db; border-radius: 8px; padding: 25px 10px; text-align: center; background: #ebf5fb; color: #2980b9; cursor: pointer; transition: all 0.3s ease; margin-bottom: 15px; font-weight: bold; font-size: 13px; }
-        #drop-zone.dragover { background: #3498db; color: white; border-color: #2980b9; transform: scale(1.02); }
-        #file-input { display: none; }
+        /* Bouton cliquable indestructible */
+        .upload-label { display: block; border: 2px dashed #3498db; border-radius: 8px; padding: 25px 10px; text-align: center; background: #ebf5fb; color: #2980b9; cursor: pointer; transition: all 0.3s ease; margin-bottom: 15px; font-weight: bold; font-size: 13px; }
+        .upload-label:hover { background: #3498db; color: white; border-color: #2980b9; transform: scale(1.02); }
+        #file-input { display: none; } /* On cache le moche bouton par défaut */
 
         select { width: 100%; padding: 10px; border: 2px solid #3498db; border-radius: 4px; margin-bottom: 10px; font-size: 13px; }
         .row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 13px; }
@@ -26,10 +26,9 @@
         <h3>Filtre Avancé par Données</h3>
         <div id="status">✅ Connecté. Prêt à lire les données.</div>
         
-        <div id="drop-zone">
-            📂 Glissez-déposez le fichier CSV ici<br>
-            <span style="font-size: 10px; font-weight: normal;">(ou cliquez pour parcourir)</span>
-        </div>
+        <label for="file-input" class="upload-label" id="upload-zone">
+            📂 CLIQUEZ ICI POUR IMPORTER LE CSV
+        </label>
         <input type="file" id="file-input" accept=".csv" />
         
         <div id="ui-filter" style="display:none;">
@@ -50,10 +49,86 @@
             } catch (e) { document.getElementById('status').innerText = "❌ Erreur de connexion au viewer."; }
         }
 
-        // --- GESTION DU DRAG & DROP ---
-        const dropZone = document.getElementById('drop-zone');
-        const fileInput = document.getElementById('file-input');
+        // --- TRAITEMENT DU FICHIER CSV LORS DU CLIC ---
+        document.getElementById('file-input').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
 
-        dropZone.addEventListener('click', () => fileInput.click());
+            if (!file.name.endsWith('.csv')) {
+                document.getElementById('status').innerText = "⚠️ Veuillez utiliser un fichier .csv";
+                return;
+            }
 
-        dropZone.addEventListener('dragover', (e) => {
+            const status = document.getElementById('status');
+            const uploadZone = document.getElementById('upload-zone');
+            status.innerText = "⏳ Analyse en cours...";
+
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    tableData = results.data;
+                    const headers = results.meta.fields;
+                    
+                    guidColumnName = headers.find(h => h.toUpperCase().includes("GUID"));
+                    
+                    if (!guidColumnName) {
+                        status.innerText = "❌ Erreur : Colonne 'GUID' manquante dans l'export.";
+                        return;
+                    }
+
+                    const menu = document.getElementById('prop-selector');
+                    menu.innerHTML = '<option value="">-- Sélectionnez un paramètre --</option>';
+                    headers.forEach(h => { if (h !== guidColumnName) menu.innerHTML += `<option value="${h}">${h}</option>`; });
+
+                    document.getElementById('ui-filter').style.display = "block";
+                    uploadZone.style.display = "none"; // On cache le gros bouton après le chargement
+                    status.innerText = `✅ Données chargées (${tableData.length} objets).`;
+                }
+            });
+        });
+
+        // --- FILTRAGE 3D (AVEC LE TRADUCTEUR D'ID) ---
+        document.getElementById('prop-selector').onchange = (e) => {
+            const selectedCol = e.target.value;
+            const res = document.getElementById('results');
+            res.innerHTML = "";
+            if (!selectedCol) return;
+
+            const groups = {};
+            tableData.forEach(row => {
+                let val = row[selectedCol] || "Non défini";
+                if (!groups[val]) groups[val] = [];
+                if (row[guidColumnName]) groups[val].push(row[guidColumnName]);
+            });
+
+            Object.keys(groups).sort().forEach(val => {
+                const div = document.createElement('div');
+                div.className = "row";
+                div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${val}</span> <span class="count">(${groups[val].length})</span>`;
+                
+                div.querySelector('input').onchange = async (ev) => {
+                    if(!API) return;
+                    try {
+                        const isChecked = ev.target.checked;
+                        const guidsBruts = groups[val];
+
+                        // 1. LA TRADUCTION : CSV GUIDs -> Viewer IDs
+                        const runtimeIds = await API.viewer.convertToObjectRuntimeIds(guidsBruts);
+
+                        // 2. LE MASQUAGE : Utilisation de l'opacité
+                        if (runtimeIds && runtimeIds.length > 0) {
+                            await API.viewer.setOpacity(runtimeIds, isChecked ? 1 : 0);
+                        }
+                    } catch (error) {
+                        console.error("Erreur lors du masquage :", error);
+                    }
+                };
+                res.appendChild(div);
+            });
+        };
+
+        init();
+    </script>
+</body>
+</html>
