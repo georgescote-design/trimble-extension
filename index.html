@@ -1,153 +1,65 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html>
 <head>
     <meta charset="UTF-8">
-    <title>Filtre BIM Georges - Force selection</title>
+    <title>Diagnostic Automatique</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
-        body { font-family: sans-serif; padding: 15px; background: white; }
-        .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        h3 { margin-top: 0; color: #333; font-size: 15px; }
-        button { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        #status { font-size: 11px; color: #666; margin-bottom: 10px; background: #f0f0f0; padding: 5px; border-radius: 3px; min-height: 20px; word-break: break-all; }
-        select { width: 100%; margin-top: 15px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
-        .row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 12px; }
+        body { font-family: sans-serif; padding: 15px; font-size: 13px; }
+        .log-box { background: #222; color: #0f0; padding: 10px; border-radius: 5px; height: 250px; overflow-y: auto; font-family: monospace; }
+        .status { margin-bottom: 10px; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div class="card">
-        <h3>Filtre : 01_MANILA w PARAMETRIC</h3>
-        <div id="status">✅ Prêt</div>
-        <button id="btn-scan">SCANNER LA SÉLECTION</button>
-        <div id="ui-filter" style="display:none;">
-            <select id="prop-selector" style="margin-top:10px;"></select>
-            <div id="results" style="margin-top:10px;"></div>
-        </div>
-    </div>
+    <div class="status" id="status">⏳ Connexion à Trimble...</div>
+    <div class="log-box" id="console">En attente d'un clic sur un objet...</div>
 
     <script>
-        let API = null;
-        let selectionData = [];
-        const TARGET_SET = "01_MANILA w PARAMETRIC";
+        let API;
+        const consoleBox = document.getElementById('console');
+        
+        function log(msg) {
+            consoleBox.innerHTML = `<div>> ${msg}</div>` + consoleBox.innerHTML;
+        }
 
         async function init() {
             try {
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-            } catch (e) { console.error(e); }
-        }
-
-        // Fonction d'extraction ultra-robuste
-        function extractIds(data) {
-            if (!data) return [];
-            // Si c'est déjà un tableau
-            if (Array.isArray(data)) {
-                return data.map(item => {
-                    if (typeof item === 'string' || typeof item === 'number') return item;
-                    return item.id || item.runtimeId || item.objectId || item.guid;
-                }).filter(id => id !== undefined);
-            }
-            // Si c'est un objet unique (certaines versions de l'API)
-            if (typeof data === 'object') {
-                const singleId = data.id || data.runtimeId || data.objectId || data.guid;
-                return singleId ? [singleId] : [];
-            }
-            return [data];
-        }
-
-        document.getElementById('btn-scan').onclick = async function() {
-            const btn = this;
-            const status = document.getElementById('status');
-            btn.innerText = "⏳ RECHERCHE...";
-            
-            try {
-                // On demande la sélection au Viewer
-                let result = await API.viewer.getSelection();
+                document.getElementById('status').innerText = "✅ CONNECTÉ. Cliquez sur un objet en 3D !";
                 
-                // On nettoie le résultat
-                let ids = extractIds(result);
-
-                // Si c'est vide, on tente un "fallback" sur le module UI (certaines configs)
-                if (ids.length === 0 && API.ui) {
-                    let uiRes = await API.ui.getSelection();
-                    ids = extractIds(uiRes);
-                }
-
-                if (ids.length === 0) {
-                    status.innerText = "⚠️ RIEN DÉTECTÉ. Cliquez bien sur l'objet pour qu'il soit JAUNE, puis attendez 1 sec.";
-                    btn.innerText = "SCANNER LA SÉLECTION";
-                    return;
-                }
-
-                status.innerText = "✅ " + ids.length + " objet(s) trouvé(s). Lecture BIM...";
-
-                // Lecture des propriétés (uniquement via Viewer)
-                selectionData = await API.viewer.getObjectProperties(ids);
-                
-                const props = new Set();
-                selectionData.forEach(obj => {
-                    if (obj.propertySets) {
-                        obj.propertySets.forEach(ps => {
-                            if (ps.name && ps.name.trim() === TARGET_SET && ps.properties) {
-                                Object.keys(ps.properties).forEach(k => props.add(k));
-                            }
-                        });
+                // --- LA SOLUTION REBELLE ---
+                // Au lieu d'attendre un clic sur un bouton, on écoute l'événement de sélection de Trimble
+                API.viewer.on("selection-changed", async (data) => {
+                    log("Sélection changée détectée !");
+                    
+                    if (!data || data.length === 0) {
+                        log("⚠️ Sélection vide reçue.");
+                        return;
                     }
-                    if (obj.properties) Object.keys(obj.properties).forEach(k => props.add(k));
+
+                    log(`ID reçu : ${JSON.stringify(data[0])}`);
+                    
+                    try {
+                        // On tente immédiatement de lire les propriétés de cet ID
+                        const ids = data.map(i => typeof i === 'object' ? (i.id || i.runtimeId) : i);
+                        const props = await API.viewer.getObjectProperties(ids);
+                        
+                        if (props && props.length > 0) {
+                            log("✅ DONNÉES TROUVÉES !");
+                            log("Groupes dispos : " + props[0].propertySets.map(ps => ps.name).join(', '));
+                        } else {
+                            log("❌ Objet identifié mais propriétés vides.");
+                        }
+                    } catch (err) {
+                        log("❌ Erreur lecture : " + err.message);
+                    }
                 });
 
-                if (props.size > 0) {
-                    const sel = document.getElementById('prop-selector');
-                    sel.innerHTML = '<option value="">-- ' + props.size + ' Paramètres détectés --</option>';
-                    Array.from(props).sort().forEach(p => sel.innerHTML += `<option value="${p}">${p}</option>`);
-                    document.getElementById('ui-filter').style.display = "block";
-                    btn.innerText = "✅ SCAN RÉUSSI";
-                    btn.style.backgroundColor = "#107c10";
-                } else {
-                    btn.innerText = "⚠️ AUCUNE DONNÉE";
-                    status.innerText = "Objet détecté, mais le groupe '" + TARGET_SET + "' est introuvable.";
-                    btn.style.backgroundColor = "#666";
-                }
-
-            } catch (err) {
-                status.innerText = "Erreur: " + err.message;
-                btn.innerText = "❌ ERREUR";
+            } catch (e) {
+                document.getElementById('status').innerText = "❌ Échec de connexion";
+                log("Erreur : " + e.message);
             }
-        };
-
-        // Gestion visibilité (Viewer + Async)
-        document.getElementById('prop-selector').onchange = (e) => {
-            const p = e.target.value;
-            const res = document.getElementById('results');
-            res.innerHTML = "";
-            if (!p) return;
-
-            const groups = {};
-            selectionData.forEach(o => {
-                let v = "Inconnu";
-                if (o.propertySets) {
-                    o.propertySets.forEach(ps => {
-                        if (ps.name && ps.name.trim() === TARGET_SET && ps.properties && ps.properties[p] !== undefined) {
-                            v = ps.properties[p];
-                        }
-                    });
-                }
-                if (v === "Inconnu" && o.properties && o.properties[p] !== undefined) v = o.properties[p];
-                
-                if(!groups[v]) groups[v] = [];
-                groups[v].push(o.runtimeId || o.id);
-            });
-
-            Object.keys(groups).sort().forEach(v => {
-                const div = document.createElement('div');
-                div.className = "row";
-                div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v} (${groups[v].length})</span>`;
-                div.querySelector('input').onchange = async (ev) => {
-                    await API.viewer.setObjectVisibility(groups[v], ev.target.checked);
-                };
-                res.appendChild(div);
-            });
-        };
-
+        }
         init();
     </script>
 </body>
