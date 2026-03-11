@@ -87,7 +87,7 @@
             });
         });
 
-        // 3. Filtrage avec la BONNE commande de ciblage
+        // 3. Filtrage avec la logique d'état binaire (0 ou 4)
         document.getElementById('prop-selector').onchange = async (e) => {
             const selectedCol = e.target.value;
             const res = document.getElementById('results');
@@ -131,15 +131,14 @@
                                     objectsToModify = objectsToModify.concat(formattedObjects);
                                 }
                             } catch (err) {
-                                // On ignore silencieusement si la pièce n'est pas dans ce modèle précis
+                                // On ignore silencieusement
                             }
                         }
 
-                        // --- LE FIX ULTIME EST ICI ---
-                        // On utilise setObjectState au lieu de setOpacity pour cibler UNIQUEMENT ces pièces
+                        // --- LE VRAI CODE DE MASQUAGE TRIMBLE ---
                         if (objectsToModify.length > 0) {
-                            // Si c'est coché, on remet l'opacité à 100%. Si c'est décoché, on la met à 0.
-                            const newState = { opacity: isChecked ? 100 : 0 };
+                            // On utilise state: 0 (Visible par défaut) ou state: 4 (Caché)
+                            const newState = { state: isChecked ? 0 : 4 };
                             await API.viewer.setObjectState(objectsToModify, newState);
                         } else {
                             console.warn("Aucun objet trouvé à masquer.");
