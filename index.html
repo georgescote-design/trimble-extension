@@ -1,62 +1,124 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Diagnostic profond</title>
+    <title>Filtre BIM Georges - Fix Final</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
-        body { font-family: sans-serif; font-size: 12px; padding: 10px; }
-        #console { background: #000; color: #0f0; padding: 10px; height: 300px; overflow: auto; border-radius: 5px; font-family: monospace; }
-        button { width: 100%; padding: 10px; margin-top: 10px; cursor: pointer; font-weight: bold; }
+        body { font-family: sans-serif; padding: 15px; background: white; }
+        .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        button { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        #status { font-size: 11px; color: #666; margin-bottom: 10px; background: #f0f0f0; padding: 5px; border-radius: 3px; min-height: 20px; }
+        select { width: 100%; margin-top: 15px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        .row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 12px; }
     </style>
 </head>
 <body>
-    <h3>Diagnostic des données</h3>
-    <div id="status">⏳ Initialisation...</div>
-    <div id="console">Appuyez sur SCAN pour inspecter un objet...</div>
-    <button id="btn-scan" style="background: #0078d4; color: white; border:none;">SCANNER L'OBJET SÉLECTIONNÉ</button>
+    <div class="card">
+        <h3>Filtre : 01_MANILA</h3>
+        <div id="status">✅ Prêt</div>
+        <button id="btn-scan">SCANNER LA SÉLECTION</button>
+        <div id="ui-filter" style="display:none;">
+            <select id="prop-selector" style="margin-top:10px;"></select>
+            <div id="results" style="margin-top:10px;"></div>
+        </div>
+    </div>
 
-<script>
-    let API;
-    async function init() {
-        try {
-            API = await TrimbleConnectWorkspace.connect(window.parent);
-            document.getElementById('status').innerText = "✅ Connecté. Sélectionnez 1 OBJET.";
-        } catch (e) { document.getElementById('status').innerText = "❌ Erreur de connexion"; }
-    }
+    <script>
+        let API = null;
+        let selectionData = [];
 
-    document.getElementById('btn-scan').onclick = async function() {
-        const log = (msg) => { document.getElementById('console').innerHTML += "<br>> " + msg; };
-        document.getElementById('console').innerHTML = "Lancement de l'inspection...";
-        
-        try {
-            const ids = await API.viewer.getSelection();
-            if (!ids || ids.length === 0) return log("ERREUR: Sélectionnez 1 objet en 3D !");
+        async function init() {
+            try {
+                API = await TrimbleConnectWorkspace.connect(window.parent);
+                if(API.extension && API.extension.requestPermission) {
+                    await API.extension.requestPermission("accesstoken");
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        document.getElementById('btn-scan').onclick = async function() {
+            const btn = this;
+            const status = document.getElementById('status');
+            btn.innerText = "⏳ SCAN EN COURS...";
             
-            log("ID détecté: " + ids[0]);
+            try {
+                const rawSelection = await API.viewer.getSelection();
+                // FIX CRUCIAL: Extraction de l'ID pur, que ce soit un objet ou une chaîne
+                const ids = rawSelection.map(item => (typeof item === 'object' ? (item.id || item.runtimeId || item.objectId) : item));
 
-            // TEST 1: Propriétés classiques
-            const props = await API.viewer.getObjectProperties([ids[0]]);
-            log("--- STRUCTURE PROPRIÉTÉS ---");
-            log(JSON.stringify(props[0], null, 2).substring(0, 500) + "...");
+                if (!ids || ids.length === 0 || !ids[0]) {
+                    status.innerText = "⚠️ Sélectionnez des objets en 3D !";
+                    btn.innerText = "SCANNER LA SÉLECTION";
+                    return;
+                }
 
-            // TEST 2: Recherche de la DataTable
-            log("--- RECHERCHE DANS LES MODULES ---");
-            const mods = Object.keys(API);
-            log("Modules dispos: " + mods.join(', '));
+                status.innerText = "Analyse de " + ids.length + " objets...";
 
-            if (API.dataTable) {
-                log("Tentative d'accès au module DataTable...");
+                // Tentative multi-modules
+                let results = [];
                 try {
-                    // On essaie d'appeler toutes les méthodes possibles pour voir laquelle répond
-                    const raw = await API.dataTable.getRows([ids[0]]);
-                    log("Contenu DataTable: " + JSON.stringify(raw).substring(0, 200));
-                } catch(e) { log("DataTable.getRows a échoué."); }
-            }
+                    results = await API.viewer.getObjectProperties(ids);
+                } catch(e) {
+                    try { results = await API.project.getProperties(ids); } catch(e2) {}
+                }
 
-        } catch (err) { log("ERREUR CRITIQUE: " + err.message); }
-    };
-    init();
-</script>
+                selectionData = results || [];
+                const props = new Set();
+                
+                selectionData.forEach(obj => {
+                    if (obj.properties) Object.keys(obj.properties).forEach(k => props.add(k));
+                    if (obj.propertySets) {
+                        obj.propertySets.forEach(ps => {
+                            if (ps.properties) Object.keys(ps.properties).forEach(k => props.add(k));
+                        });
+                    }
+                });
+
+                if (props.size > 0) {
+                    const sel = document.getElementById('prop-selector');
+                    sel.innerHTML = '<option value="">-- ' + props.size + ' Paramètres --</option>';
+                    Array.from(props).sort().forEach(p => sel.innerHTML += `<option value="${p}">${p}</option>`);
+                    document.getElementById('ui-filter').style.display = "block";
+                    btn.innerText = "✅ SCAN RÉUSSI";
+                    btn.style.backgroundColor = "#107c10";
+                } else {
+                    btn.innerText = "⚠️ AUCUNE DONNÉE";
+                    status.innerText = "IDs extraits mais propriétés vides. Vérifiez l'onglet Manila.";
+                }
+
+            } catch (err) {
+                status.innerText = "Erreur: " + err.message;
+            }
+        };
+
+        document.getElementById('prop-selector').onchange = (e) => {
+            const p = e.target.value;
+            const res = document.getElementById('results');
+            res.innerHTML = "";
+            const groups = {};
+
+            selectionData.forEach(o => {
+                let v = "Inconnu";
+                if (o.properties && o.properties[p] !== undefined) v = o.properties[p];
+                else if (o.propertySets) {
+                    o.propertySets.forEach(ps => {
+                        if (ps.properties && ps.properties[p] !== undefined) v = ps.properties[p];
+                    });
+                }
+                if(!groups[v]) groups[v] = [];
+                groups[v].push(o.id);
+            });
+
+            Object.keys(groups).sort().forEach(v => {
+                const div = document.createElement('div');
+                div.className = "row";
+                div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v} (${groups[v].length})</span>`;
+                div.querySelector('input').onchange = (ev) => API.view.setObjectVisibility(groups[v], ev.target.checked);
+                res.appendChild(div);
+            });
+        };
+        init();
+    </script>
 </body>
 </html>
