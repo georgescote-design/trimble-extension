@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Filtre BIM Georges - Optimisé</title>
+    <title>Filtre BIM Georges</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
         body { font-family: sans-serif; padding: 15px; background: white; }
@@ -30,16 +30,12 @@
         let selectionData = [];
         const TARGET_SET = "01_MANILA w PARAMETRIC";
 
-        // 1. Initialisation avec permissions corrigées (Copilot)
         async function init() {
             const status = document.getElementById('status');
             try {
+                // Retour à la connexion simple qui fonctionnait
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-                if(API.extension && API.extension.requestPermission) {
-                    // Test de la permission "read" pour les données
-                    await API.extension.requestPermission("read");
-                }
-                status.innerText = "✅ Prêt (API Connectée)";
+                status.innerText = "✅ Système prêt";
             } catch (e) { 
                 status.innerText = "❌ Échec de connexion API";
                 console.error(e); 
@@ -50,18 +46,17 @@
             const btn = this;
             const status = document.getElementById('status');
             
-            // Validation d'API (Copilot)
             if (!API || !API.viewer) {
-                status.innerText = "❌ API non initialisée";
+                status.innerText = "❌ API non disponible";
                 return;
             }
 
-            btn.innerText = "⏳ SCAN EN COURS...";
+            btn.innerText = "⏳ ANALYSE...";
             btn.style.backgroundColor = "#ff9800";
             
             try {
                 const rawSelection = await API.viewer.getSelection();
-                // Extraction ID robuste (Gemini)
+                // Extraction ID robuste
                 const ids = rawSelection.map(item => (typeof item === 'object' ? (item.id || item.runtimeId || item.objectId) : item));
 
                 if (!ids || ids.length === 0 || !ids[0]) {
@@ -73,17 +68,10 @@
 
                 status.innerText = "Analyse de " + ids.length + " objets...";
 
-                // Tentative multi-modules pour les propriétés
-                let results = [];
-                try {
-                    results = await API.viewer.getObjectProperties(ids);
-                } catch(e) {
-                    try { results = await API.project.getProperties(ids); } catch(e2) {}
-                }
-
-                selectionData = results || [];
-                const props = new Set();
+                // Utilisation de getObjectProperties (confirmé par nos tests précédents)
+                selectionData = await API.viewer.getObjectProperties(ids);
                 
+                const props = new Set();
                 selectionData.forEach(obj => {
                     if (obj.propertySets) {
                         obj.propertySets.forEach(ps => {
@@ -97,29 +85,31 @@
 
                 if (props.size > 0) {
                     const sel = document.getElementById('prop-selector');
-                    sel.innerHTML = '<option value="">-- ' + props.size + ' Paramètres Manila --</option>';
+                    sel.innerHTML = '<option value="">-- ' + props.size + ' Paramètres trouvés --</option>';
                     Array.from(props).sort().forEach(p => sel.innerHTML += `<option value="${p}">${p}</option>`);
                     document.getElementById('ui-filter').style.display = "block";
                     btn.innerText = "✅ SCAN RÉUSSI";
                     btn.style.backgroundColor = "#107c10";
                 } else {
-                    btn.innerText = "⚠️ DONNÉES INVISIBLES";
+                    btn.innerText = "⚠️ AUCUNE DONNÉE";
                     status.innerText = "Vérifiez que le tableau Manila est ouvert.";
+                    btn.style.backgroundColor = "#666";
                 }
 
             } catch (err) {
                 status.innerText = "Erreur: " + err.message;
                 btn.innerText = "❌ ERREUR";
+                btn.style.backgroundColor = "#d13438";
             }
         };
 
-        // 2. Gestion async de la visibilité (Copilot)
         document.getElementById('prop-selector').onchange = (e) => {
             const p = e.target.value;
             const res = document.getElementById('results');
             res.innerHTML = "";
-            const groups = {};
+            if (!p) return;
 
+            const groups = {};
             selectionData.forEach(o => {
                 let v = "Inconnu";
                 if (o.propertySets) {
@@ -140,15 +130,16 @@
                 div.className = "row";
                 div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v} (${groups[v].length})</span>`;
                 
-                // Correction Async + Viewer (Copilot)
+                // On garde la correction de Copilot pour la commande de visibilité
                 div.querySelector('input').onchange = async (ev) => {
                     try {
-                        if(API && API.viewer) {
+                        // On tente viewer (Copilot) puis view (Original)
+                        if (API.viewer && API.viewer.setObjectVisibility) {
                             await API.viewer.setObjectVisibility(groups[v], ev.target.checked);
+                        } else {
+                            await API.view.setObjectVisibility(groups[v], ev.target.checked);
                         }
-                    } catch (err) {
-                        console.error("Erreur visibilité:", err);
-                    }
+                    } catch (err) { console.error(err); }
                 };
                 res.appendChild(div);
             });
