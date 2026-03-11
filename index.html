@@ -2,20 +2,33 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Filtre BIM Georges - Pro</title>
+    <title>Filtre BIM Georges - Expert</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 15px; background: white; }
         .card { border: 2px solid #2c3e50; padding: 15px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        h3 { margin-top: 0; color: #2c3e50; font-size: 16px; }
+        h3 { margin-top: 0; color: #2c3e50; font-size: 16px; display: flex; justify-content: space-between; align-items: center; }
         #status { font-size: 12px; padding: 8px; background: #ecf0f1; border-radius: 4px; margin-bottom: 15px; color: #34495e; }
+        
         .upload-label { display: block; border: 2px dashed #3498db; border-radius: 8px; padding: 25px 10px; text-align: center; background: #ebf5fb; color: #2980b9; cursor: pointer; transition: all 0.3s ease; margin-bottom: 15px; font-weight: bold; font-size: 13px; }
         .upload-label:hover { background: #3498db; color: white; border-color: #2980b9; transform: scale(1.02); }
         #file-input { display: none; }
+        
         select { width: 100%; padding: 10px; border: 2px solid #3498db; border-radius: 4px; margin-bottom: 10px; font-size: 13px; }
-        .row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 13px; }
-        .count { color: #7f8c8d; font-weight: bold; margin-left: 5px; font-size: 11px; }
+        
+        .row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 13px; transition: background 0.2s; }
+        .row:hover { background: #f9f9f9; }
+        .count { color: #7f8c8d; font-weight: bold; margin-left: auto; font-size: 11px; }
+        
+        /* Style du sélecteur de couleur */
+        input[type="color"] { border: none; width: 24px; height: 24px; border-radius: 4px; cursor: pointer; margin-left: 8px; margin-right: 8px; padding: 0; background: none; }
+        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+        input[type="color"]::-webkit-color-swatch { border: 1px solid #bdc3c7; border-radius: 4px; }
+        
+        /* Bouton Reset */
+        #btn-reset { background: #e74c3c; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 11px; cursor: pointer; font-weight: bold; display: none; margin-bottom: 10px; width: 100%; }
+        #btn-reset:hover { background: #c0392b; }
     </style>
 </head>
 <body>
@@ -31,6 +44,9 @@
         <div id="ui-filter" style="display:none;">
             <p style="font-size:12px; margin-bottom:5px; font-weight: bold; color: #2c3e50;">Filtrer par :</p>
             <select id="prop-selector"></select>
+            
+            <button id="btn-reset">🔄 TOUT RÉAFFICHER & RÉINITIALISER COULEURS</button>
+            
             <div id="results" style="margin-top:10px;"></div>
         </div>
     </div>
@@ -40,60 +56,66 @@
         let tableData = [];
         let guidColumnName = "";
 
-        // 1. Initialisation de la connexion
-        async function init() {
-            try {
-                API = await TrimbleConnectWorkspace.connect(window.parent);
-            } catch (e) { 
-                document.getElementById('status').innerText = "❌ Erreur de connexion au viewer."; 
-            }
+        // Fonction de décodage mathématique : HEX (#ff0000) vers RGBA (255, 0, 0, 255)
+        function hexToRgba(hex) {
+            let c = hex.substring(1).split('');
+            if(c.length === 3){ c = [c[0], c[0], c[1], c[1], c[2], c[2]]; }
+            c = '0x' + c.join('');
+            return {
+                r: (c >> 16) & 255,
+                g: (c >> 8) & 255,
+                b: c & 255,
+                a: 255 // Opacité maximale pour la peinture
+            };
         }
 
-        // 2. Traitement du fichier CSV
+        async function init() {
+            try { API = await TrimbleConnectWorkspace.connect(window.parent); } 
+            catch (e) { document.getElementById('status').innerText = "❌ Erreur de connexion."; }
+        }
+
         document.getElementById('file-input').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
 
             const status = document.getElementById('status');
-            const uploadZone = document.getElementById('upload-zone');
             status.innerText = "⏳ Analyse en cours...";
 
             Papa.parse(file, {
-                header: true,
-                skipEmptyLines: true,
+                header: true, skipEmptyLines: true,
                 complete: function(results) {
                     tableData = results.data;
                     const headers = results.meta.fields;
-                    
                     guidColumnName = headers.find(h => h.toUpperCase().includes("GUID"));
                     
                     if (!guidColumnName) {
-                        status.innerText = "❌ Erreur : Colonne 'GUID' manquante dans l'export.";
-                        return;
+                        status.innerText = "❌ Erreur : Colonne 'GUID' manquante."; return;
                     }
 
                     const menu = document.getElementById('prop-selector');
                     menu.innerHTML = '<option value="">-- Sélectionnez un paramètre --</option>';
                     headers.forEach(h => { 
-                        if (h !== guidColumnName) {
-                            menu.innerHTML += `<option value="${h}">${h}</option>`; 
-                        }
+                        if (h !== guidColumnName) menu.innerHTML += `<option value="${h}">${h}</option>`; 
                     });
 
                     document.getElementById('ui-filter').style.display = "block";
-                    uploadZone.style.display = "none";
+                    document.getElementById('upload-zone').style.display = "none";
                     status.innerText = `✅ Données chargées (${tableData.length} objets).`;
                 }
             });
         });
 
-        // 3. Filtrage avec la logique STRICTE de l'API Trimble
+        // Fonction centrale du filtre
         document.getElementById('prop-selector').onchange = async (e) => {
             const selectedCol = e.target.value;
             const res = document.getElementById('results');
+            const btnReset = document.getElementById('btn-reset');
+            
             res.innerHTML = "⏳ Préparation du filtre...";
-            if (!selectedCol) { res.innerHTML = ""; return; }
+            if (!selectedCol) { res.innerHTML = ""; btnReset.style.display = "none"; return; }
+            btnReset.style.display = "block";
 
+            // Groupement des données
             const groups = {};
             tableData.forEach(row => {
                 let val = row[selectedCol] || "Non défini";
@@ -103,60 +125,92 @@
 
             res.innerHTML = "";
 
+            // Création de l'interface pour chaque groupe
             Object.keys(groups).sort().forEach(val => {
                 const div = document.createElement('div');
                 div.className = "row";
-                div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${val}</span> <span class="count">(${groups[val].length})</span>`;
                 
-                div.querySelector('input').onchange = async (ev) => {
-                    if(!API) return;
-                    try {
-                        const isChecked = ev.target.checked;
-                        const guidsBruts = groups[val];
+                // On ajoute la Checkbox ET le Color Picker
+                div.innerHTML = `
+                    <input type="checkbox" class="vis-check" checked title="Afficher/Masquer"> 
+                    <input type="color" class="color-picker" value="#95a5a6" title="Peindre les objets">
+                    <span style="font-weight: 500;">${val}</span> 
+                    <span class="count">(${groups[val].length})</span>
+                `;
+                
+                const checkbox = div.querySelector('.vis-check');
+                const colorPicker = div.querySelector('.color-picker');
+                
+                // NOTRE MÉMOIRE CACHE : Évite de recalculer les IDs à chaque changement de couleur
+                let cachedSelector = null;
 
-                        const models = await API.viewer.getModels();
-                        
-                        // L'enveloppe stricte exigée par Trimble
-                        let modelObjectsArray = [];
-
-                        // Traduction des GUIDs
-                        for (const model of models) {
-                            const mId = model.id || model.modelId;
-                            if (!mId) continue;
-                            
-                            try {
-                                const rIds = await API.viewer.convertToObjectRuntimeIds(mId, guidsBruts);
-                                if (rIds && rIds.length > 0) {
-                                    // On ajoute un bloc complet {modelId, objectRuntimeIds: [1,2,3]}
-                                    modelObjectsArray.push({
-                                        modelId: mId,
-                                        objectRuntimeIds: rIds
-                                    });
-                                }
-                            } catch (err) {
-                                // Silencieux si la pièce n'est pas dans ce sous-modèle
+                // Fonction interne pour récupérer les objets (Traduction avec cache)
+                const getObjectSelector = async () => {
+                    if (cachedSelector) return cachedSelector; // Si on a déjà traduit, on sert depuis la RAM
+                    
+                    const models = await API.viewer.getModels();
+                    let modelObjectsArray = [];
+                    for (const model of models) {
+                        const mId = model.id || model.modelId;
+                        if (!mId) continue;
+                        try {
+                            const rIds = await API.viewer.convertToObjectRuntimeIds(mId, groups[val]);
+                            if (rIds && rIds.length > 0) {
+                                modelObjectsArray.push({ modelId: mId, objectRuntimeIds: rIds });
                             }
-                        }
+                        } catch (err) {} // Silencieux
+                    }
+                    if (modelObjectsArray.length > 0) {
+                        cachedSelector = { modelObjectIds: modelObjectsArray };
+                    }
+                    return cachedSelector;
+                };
 
-                        // LE VRAI MASQUAGE
-                        if (modelObjectsArray.length > 0) {
-                            // On construit le "ObjectSelector" exact
-                            const selector = { modelObjectIds: modelObjectsArray };
-                            
-                            // On construit le "ObjectState" avec la propriété 'visible' (True ou False)
-                            const newState = { visible: isChecked };
-                            
-                            await API.viewer.setObjectState(selector, newState);
-                        } else {
-                            console.warn("Aucun objet trouvé à masquer.");
-                        }
-
-                    } catch (error) {
-                        console.error("Erreur lors du masquage :", error);
+                // ÉVÈNEMENT 1 : Clic sur la visibilité (Checkbox)
+                checkbox.onchange = async () => {
+                    if(!API) return;
+                    const selector = await getObjectSelector();
+                    if (selector) {
+                        await API.viewer.setObjectState(selector, { visible: checkbox.checked });
                     }
                 };
+
+                // ÉVÈNEMENT 2 : Changement de couleur (Color Picker)
+                colorPicker.addEventListener('input', async (ev) => {
+                    if(!API) return;
+                    const selector = await getObjectSelector();
+                    if (selector) {
+                        // On convertit le code HEX en canal RGBA pour Trimble
+                        const trimbleColor = hexToRgba(ev.target.value);
+                        // On applique la couleur ET on s'assure que l'objet est visible
+                        await API.viewer.setObjectState(selector, { color: trimbleColor, visible: true });
+                        checkbox.checked = true; // On recoche la case visuellement par logique
+                    }
+                });
+
                 res.appendChild(div);
             });
+        };
+
+        // LE BOUTON RESET : Le disjoncteur général
+        document.getElementById('btn-reset').onclick = async () => {
+            if(!API) return;
+            
+            // 1. Remettre toutes les couleurs par défaut du modèle 3D
+            try { await API.viewer.resetColors(); } catch(e) { console.error("Erreur reset couleur", e); }
+            
+            // 2. Recocher visuellement toutes les cases et forcer la visibilité
+            const checkboxes = document.querySelectorAll('.vis-check');
+            checkboxes.forEach(chk => {
+                if(!chk.checked) {
+                    chk.checked = true;
+                    chk.dispatchEvent(new Event('change')); // Simule un clic pour renvoyer l'ordre à la 3D
+                }
+            });
+            
+            // 3. Remettre les sélecteurs de couleur au gris par défaut
+            const colorPickers = document.querySelectorAll('.color-picker');
+            colorPickers.forEach(cp => cp.value = "#95a5a6");
         };
 
         init();
