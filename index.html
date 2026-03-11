@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Filtre BIM Georges - DataTable</title>
+    <title>Filtre BIM Georges - Auto-Détection</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
         body { font-family: sans-serif; padding: 15px; background: white; }
@@ -15,9 +15,9 @@
 </head>
 <body>
     <div class="card">
-        <h3>Filtre : 01_MANILA (Table)</h3>
+        <h3>Filtre Intelligent (Auto-Fix)</h3>
         <div id="status">✅ Système prêt</div>
-        <button id="btn-scan">SCANNER LE TABLEAU</button>
+        <button id="btn-scan">SCANNER LES DONNÉES</button>
         <div id="ui-filter" style="display:none;">
             <select id="prop-selector"></select>
             <div id="results"></div>
@@ -40,51 +40,59 @@
         document.getElementById('btn-scan').onclick = async function() {
             const btn = this;
             const status = document.getElementById('status');
-            btn.innerText = "⏳ LECTURE DU TABLEAU...";
+            btn.innerText = "⏳ RECHERCHE MÉTHODE...";
             btn.style.backgroundColor = "#ff9800";
 
             try {
-                // 1. Récupérer les IDs sélectionnés dans le Viewer
                 const ids = await API.viewer.getSelection();
-                
                 if (!ids || ids.length === 0) {
-                    status.innerText = "⚠️ Sélectionnez des objets dans la vue 3D !";
-                    btn.innerText = "SCANNER LE TABLEAU";
-                    btn.style.backgroundColor = "#0078d4";
+                    status.innerText = "⚠️ Sélectionnez des objets d'abord !";
+                    btn.innerText = "SCANNER"; btn.style.backgroundColor = "#0078d4";
                     return;
                 }
 
-                // 2. UTILISER LE MODULE DATATABLE (Détecté sur ta capture)
-                // On demande les lignes du tableau pour les IDs sélectionnés
-                const result = await API.dataTable.getRows(ids);
-                tableData = result || [];
+                let result = null;
 
+                // --- STRATÉGIE DE DÉTECTION AUTOMATIQUE ---
+                // Test 1: Organizer (Le plus probable pour 01_MANILA)
+                if (API.organizer && API.organizer.getRows) {
+                    result = await API.organizer.getRows(ids);
+                } 
+                // Test 2: DataTable avec nouveau nom
+                else if (API.dataTable && API.dataTable.getRowsByObjectIds) {
+                    result = await API.dataTable.getRowsByObjectIds(ids);
+                }
+                // Test 3: Project Properties (Retour à la base si le tableau est bloqué)
+                else {
+                    result = await API.viewer.getObjectProperties(ids);
+                }
+
+                tableData = result || [];
                 const props = new Set();
-                tableData.forEach(row => {
-                    if (row.properties) {
-                        Object.keys(row.properties).forEach(k => props.add(k));
-                    }
+                
+                tableData.forEach(item => {
+                    const data = item.properties || item.data || item;
+                    Object.keys(data).forEach(k => {
+                        if (typeof data[k] !== 'object') props.add(k);
+                    });
                 });
 
-                const sel = document.getElementById('prop-selector');
                 if (props.size > 0) {
-                    sel.innerHTML = '<option value="">-- ' + props.size + ' Colonnes trouvées --</option>';
-                    Array.from(props).sort().forEach(p => {
-                        sel.innerHTML += `<option value="${p}">${p}</option>`;
-                    });
+                    const sel = document.getElementById('prop-selector');
+                    sel.innerHTML = '<option value="">-- ' + props.size + ' Paramètres --</option>';
+                    Array.from(props).sort().forEach(p => sel.innerHTML += `<option value="${p}">${p}</option>`);
                     document.getElementById('ui-filter').style.display = "block";
                     btn.innerText = "✅ SCAN RÉUSSI";
                     btn.style.backgroundColor = "#107c10";
-                    status.innerText = "✅ " + tableData.length + " lignes récupérées.";
+                    status.innerText = "✅ " + tableData.length + " objets lus.";
                 } else {
-                    btn.innerText = "⚠️ TABLEAU VIDE";
-                    status.innerText = "Assurez-vous que le tableau '01_MANILA' est bien ouvert en bas.";
-                    btn.style.backgroundColor = "#666";
+                    btn.innerText = "⚠️ AUCUNE PROPRIÉTÉ";
+                    status.innerText = "Les objets sont là, mais leurs colonnes sont invisibles pour l'API.";
                 }
+
             } catch (err) {
                 btn.innerText = "❌ ERREUR";
-                btn.style.backgroundColor = "#d13438";
-                status.innerText = "Détail : " + err.message;
+                status.innerText = "Erreur : " + err.message;
             }
         };
 
@@ -94,13 +102,11 @@
             res.innerHTML = "";
             const groups = {};
 
-            tableData.forEach(row => {
-                let v = "Non défini";
-                if (row.properties && row.properties[p] !== undefined) {
-                    v = row.properties[p];
-                }
+            tableData.forEach(item => {
+                const data = item.properties || item.data || item;
+                let v = data[p] !== undefined ? data[p] : "Non défini";
                 if(!groups[v]) groups[v] = [];
-                groups[v].push(row.id);
+                groups[v].push(item.id || item.objectId);
             });
 
             Object.keys(groups).sort().forEach(v => {
