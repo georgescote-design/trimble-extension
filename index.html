@@ -87,7 +87,7 @@
             });
         });
 
-        // 3. Filtrage avec la logique d'état binaire (0 ou 4)
+        // 3. Filtrage avec la logique STRICTE de l'API Trimble
         document.getElementById('prop-selector').onchange = async (e) => {
             const selectedCol = e.target.value;
             const res = document.getElementById('results');
@@ -115,9 +115,11 @@
                         const guidsBruts = groups[val];
 
                         const models = await API.viewer.getModels();
-                        let objectsToModify = [];
+                        
+                        // L'enveloppe stricte exigée par Trimble
+                        let modelObjectsArray = [];
 
-                        // Traduction des GUIDs en Runtime IDs (avec l'étiquette du modèle)
+                        // Traduction des GUIDs
                         for (const model of models) {
                             const mId = model.id || model.modelId;
                             if (!mId) continue;
@@ -125,21 +127,26 @@
                             try {
                                 const rIds = await API.viewer.convertToObjectRuntimeIds(mId, guidsBruts);
                                 if (rIds && rIds.length > 0) {
-                                    const formattedObjects = rIds.map(rId => {
-                                        return { modelId: mId, runtimeId: rId };
+                                    // On ajoute un bloc complet {modelId, objectRuntimeIds: [1,2,3]}
+                                    modelObjectsArray.push({
+                                        modelId: mId,
+                                        objectRuntimeIds: rIds
                                     });
-                                    objectsToModify = objectsToModify.concat(formattedObjects);
                                 }
                             } catch (err) {
-                                // On ignore silencieusement
+                                // Silencieux si la pièce n'est pas dans ce sous-modèle
                             }
                         }
 
-                        // --- LE VRAI CODE DE MASQUAGE TRIMBLE ---
-                        if (objectsToModify.length > 0) {
-                            // On utilise state: 0 (Visible par défaut) ou state: 4 (Caché)
-                            const newState = { state: isChecked ? 0 : 4 };
-                            await API.viewer.setObjectState(objectsToModify, newState);
+                        // LE VRAI MASQUAGE
+                        if (modelObjectsArray.length > 0) {
+                            // On construit le "ObjectSelector" exact
+                            const selector = { modelObjectIds: modelObjectsArray };
+                            
+                            // On construit le "ObjectState" avec la propriété 'visible' (True ou False)
+                            const newState = { visible: isChecked };
+                            
+                            await API.viewer.setObjectState(selector, newState);
                         } else {
                             console.warn("Aucun objet trouvé à masquer.");
                         }
