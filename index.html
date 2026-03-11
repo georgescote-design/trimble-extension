@@ -2,66 +2,137 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Extracteur de Données Manila</title>
+    <title>Filtre BIM Georges - Final</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
-        body { font-family: sans-serif; padding: 15px; font-size: 12px; }
-        .card { border: 2px solid #107c10; padding: 15px; border-radius: 8px; background: #fff; }
-        button { width: 100%; padding: 12px; background: #107c10; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
-        #log-box { background: #1e1e1e; color: #4af626; padding: 10px; height: 350px; overflow-y: auto; font-family: monospace; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word;}
+        body { font-family: sans-serif; padding: 15px; }
+        .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        #btn-scan { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
+        #status { font-size: 11px; padding: 8px; background: #f0f0f0; border-radius: 4px; margin-bottom: 10px; min-height: 15px; color: #333; }
+        select { width: 100%; padding: 10px; border: 2px solid #0078d4; border-radius: 4px; }
+        .row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 12px; }
+        .count { color: #0078d4; font-weight: bold; margin-left: 5px; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h3 style="margin-top:0;">Lecteur du Tableau de Données (CSV)</h3>
-        <button id="btn-scan">LIRE LES COLONNES DU PROJET</button>
-        <div id="log-box">En attente de lecture...</div>
+        <h3>Filtre des Propriétés</h3>
+        <div id="status">⏳ Initialisation...</div>
+        <button id="btn-scan">1. ANALYSER LA SÉLECTION</button>
+        
+        <div id="ui-filter" style="display:none;">
+            <p style="font-size:11px; margin-bottom:5px;">2. Choisir un paramètre :</p>
+            <select id="prop-selector"></select>
+            <div id="results" style="margin-top:10px;"></div>
+        </div>
     </div>
 
     <script>
         let API = null;
+        let currentData = [];
 
         async function init() {
             try {
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-            } catch (e) { document.getElementById('log-box').innerText = "Erreur de connexion."; }
+                document.getElementById('status').innerText = "✅ Système prêt.";
+            } catch (e) { document.getElementById('status').innerText = "❌ Erreur de connexion."; }
         }
 
         document.getElementById('btn-scan').onclick = async function() {
-            const logBox = document.getElementById('log-box');
-            this.innerText = "⏳ EXTRACTION EN COURS...";
-            logBox.innerText = "Interrogation du module dataTable et Pset...\n\n";
+            const status = document.getElementById('status');
+            this.innerText = "⏳ LECTURE DES DONNÉES...";
+            this.style.backgroundColor = "#ff9800";
             
             try {
-                // 1. Interrogation du Tableau de données (dataTable)
-                if (API.dataTable) {
-                    try {
-                        const cols = await API.dataTable.getAllColumns();
-                        logBox.innerText += "=== COLONNES DU TABLEAU ===\n";
-                        logBox.innerText += JSON.stringify(cols, null, 2).substring(0, 800) + "\n\n";
-                    } catch(e) { logBox.innerText += `Erreur Colonnes: ${e.message}\n\n`; }
-
-                    try {
-                        const colSets = await API.dataTable.getColumnSets();
-                        logBox.innerText += "=== GROUPES DE COLONNES ===\n";
-                        logBox.innerText += JSON.stringify(colSets, null, 2).substring(0, 800) + "\n\n";
-                    } catch(e) { logBox.innerText += `Erreur Groupes: ${e.message}\n\n`; }
-                } else {
-                    logBox.innerText += "Module dataTable non accessible.\n\n";
+                const rawSelection = await API.viewer.getSelection();
+                if (!rawSelection || rawSelection.length === 0) {
+                    status.innerText = "⚠️ Sélectionnez d'abord des objets en 3D !";
+                    this.innerText = "1. ANALYSER LA SÉLECTION";
+                    this.style.backgroundColor = "#0078d4";
+                    return;
                 }
 
-                // 2. Interrogation des définitions de propriétés (viewer)
+                let ids = [];
                 try {
-                    const psets = await API.viewer.getPsetDefinitions();
-                    logBox.innerText += "=== DÉFINITIONS PROPRIÉTÉS (MANILA ?) ===\n";
-                    logBox.innerText += JSON.stringify(psets, null, 2).substring(0, 1000) + "\n\n";
-                } catch(e) { logBox.innerText += `Erreur Pset: ${e.message}\n\n`; }
+                    ids = await API.viewer.convertToObjectIds(rawSelection);
+                } catch(e) {
+                    ids = rawSelection.map(item => typeof item === 'object' ? (item.id || item.runtimeId) : item);
+                }
 
-                this.innerText = "✅ EXTRACTION TERMINÉE";
+                status.innerText = "✅ " + ids.length + " objets détectés. Extraction des paramètres...";
+
+                currentData = await API.viewer.getObjectProperties(ids);
+                const props = new Set();
+                
+                // LE FIX EST ICI : On lit TOUS les vrais dossiers, on ne cherche plus le faux nom "Manila"
+                currentData.forEach(obj => {
+                    if (obj.propertySets) {
+                        obj.propertySets.forEach(ps => {
+                            if (ps.properties) {
+                                // On affiche [Nom_Du_Dossier] Nom_Du_Paramètre pour que ce soit clair
+                                Object.keys(ps.properties).forEach(k => props.add(`${ps.name} + ${k}`));
+                            }
+                        });
+                    }
+                });
+
+                if (props.size > 0) {
+                    const menu = document.getElementById('prop-selector');
+                    menu.innerHTML = '<option value="">-- Choisissez un paramètre --</option>';
+                    Array.from(props).sort().forEach(p => {
+                        // Nettoyage de l'affichage
+                        const displayName = p.replace(' + ', ' ➔ ');
+                        menu.innerHTML += `<option value="${p}">${displayName}</option>`;
+                    });
+                    
+                    document.getElementById('ui-filter').style.display = "block";
+                    status.innerText = "✅ Succès ! Les paramètres sont prêts.";
+                    this.innerText = "NOUVELLE ANALYSE";
+                    this.style.backgroundColor = "#107c10";
+                } else {
+                    status.innerText = "⚠️ Les objets sélectionnés n'ont pas de propriétés BIM.";
+                    this.innerText = "1. ANALYSER LA SÉLECTION";
+                }
             } catch (err) {
-                logBox.innerText += "\nErreur globale: " + err.message;
-                this.innerText = "❌ ERREUR";
+                status.innerText = "❌ Erreur : " + err.message;
             }
+        };
+
+        document.getElementById('prop-selector').onchange = (e) => {
+            const selectedVal = e.target.value;
+            const res = document.getElementById('results');
+            res.innerHTML = "";
+            if (!selectedVal) return;
+
+            // On sépare le nom du dossier et le nom du paramètre
+            const parts = selectedVal.split(' + ');
+            const targetPset = parts[0];
+            const targetProp = parts[1];
+
+            const groups = {};
+            currentData.forEach(o => {
+                let val = "Vide / Non défini";
+                if (o.propertySets) {
+                    o.propertySets.forEach(ps => {
+                        if (ps.name === targetPset && ps.properties && ps.properties[targetProp] !== undefined) {
+                            val = ps.properties[targetProp];
+                        }
+                    });
+                }
+                if (!groups[val]) groups[val] = [];
+                groups[val].push(o.runtimeId || o.id);
+            });
+
+            Object.keys(groups).sort().forEach(v => {
+                const div = document.createElement('div');
+                div.className = "row";
+                div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v}</span> <span class="count">(${groups[v].length})</span>`;
+                div.querySelector('input').onchange = async (ev) => {
+                    // Visibilité par opacité !
+                    await API.viewer.setOpacity(groups[v], ev.target.checked ? 1 : 0);
+                };
+                res.appendChild(div);
+            });
         };
 
         init();
