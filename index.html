@@ -2,54 +2,67 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Cartographie API</title>
+    <title>Extracteur de Données Manila</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
         body { font-family: sans-serif; padding: 15px; font-size: 12px; }
-        .card { border: 2px solid #333; padding: 15px; border-radius: 8px; background: #fff; }
-        #log-box { background: #1e1e1e; color: #d4d4d4; padding: 10px; height: 400px; overflow-y: auto; font-family: monospace; margin-top: 10px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word;}
-        .highlight { color: #569cd6; font-weight: bold; }
-        .func { color: #dcdcaa; }
+        .card { border: 2px solid #107c10; padding: 15px; border-radius: 8px; background: #fff; }
+        button { width: 100%; padding: 12px; background: #107c10; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
+        #log-box { background: #1e1e1e; color: #4af626; padding: 10px; height: 350px; overflow-y: auto; font-family: monospace; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word;}
     </style>
 </head>
 <body>
     <div class="card">
-        <h3 style="margin-top:0;">🔍 Cartographie Totale de l'API</h3>
-        <div id="status">⏳ Connexion...</div>
-        <div id="log-box">Recherche des modules en cours...</div>
+        <h3 style="margin-top:0;">Lecteur du Tableau de Données (CSV)</h3>
+        <button id="btn-scan">LIRE LES COLONNES DU PROJET</button>
+        <div id="log-box">En attente de lecture...</div>
     </div>
 
     <script>
-        async function init() {
-            const logBox = document.getElementById('log-box');
-            try {
-                const API = await TrimbleConnectWorkspace.connect(window.parent);
-                document.getElementById('status').innerText = "✅ Connecté.";
-                
-                let output = "=== MODULES PRINCIPAUX ===\n";
-                const modules = Object.keys(API);
-                output += modules.join(", ") + "\n\n";
+        let API = null;
 
-                output += "=== DÉTAIL DES COMMANDES ===\n";
-                for (const mod of modules) {
-                    if (typeof API[mod] === 'object' && API[mod] !== null) {
-                        const funcs = Object.keys(API[mod]).filter(k => typeof API[mod][k] === 'function');
-                        if (funcs.length > 0) {
-                            output += `<span class="highlight">API.${mod}</span> dispose de ${funcs.length} commandes :\n`;
-                            output += `<span class="func">${funcs.join("\n ")}</span>\n\n`;
-                        } else {
-                            output += `<span class="highlight">API.${mod}</span> : (Aucune fonction directe)\n\n`;
-                        }
-                    }
+        async function init() {
+            try {
+                API = await TrimbleConnectWorkspace.connect(window.parent);
+            } catch (e) { document.getElementById('log-box').innerText = "Erreur de connexion."; }
+        }
+
+        document.getElementById('btn-scan').onclick = async function() {
+            const logBox = document.getElementById('log-box');
+            this.innerText = "⏳ EXTRACTION EN COURS...";
+            logBox.innerText = "Interrogation du module dataTable et Pset...\n\n";
+            
+            try {
+                // 1. Interrogation du Tableau de données (dataTable)
+                if (API.dataTable) {
+                    try {
+                        const cols = await API.dataTable.getAllColumns();
+                        logBox.innerText += "=== COLONNES DU TABLEAU ===\n";
+                        logBox.innerText += JSON.stringify(cols, null, 2).substring(0, 800) + "\n\n";
+                    } catch(e) { logBox.innerText += `Erreur Colonnes: ${e.message}\n\n`; }
+
+                    try {
+                        const colSets = await API.dataTable.getColumnSets();
+                        logBox.innerText += "=== GROUPES DE COLONNES ===\n";
+                        logBox.innerText += JSON.stringify(colSets, null, 2).substring(0, 800) + "\n\n";
+                    } catch(e) { logBox.innerText += `Erreur Groupes: ${e.message}\n\n`; }
+                } else {
+                    logBox.innerText += "Module dataTable non accessible.\n\n";
                 }
 
-                logBox.innerHTML = output;
+                // 2. Interrogation des définitions de propriétés (viewer)
+                try {
+                    const psets = await API.viewer.getPsetDefinitions();
+                    logBox.innerText += "=== DÉFINITIONS PROPRIÉTÉS (MANILA ?) ===\n";
+                    logBox.innerText += JSON.stringify(psets, null, 2).substring(0, 1000) + "\n\n";
+                } catch(e) { logBox.innerText += `Erreur Pset: ${e.message}\n\n`; }
 
-            } catch (e) { 
-                document.getElementById('status').innerText = "❌ Erreur de connexion.";
-                logBox.innerText = e.message;
+                this.innerText = "✅ EXTRACTION TERMINÉE";
+            } catch (err) {
+                logBox.innerText += "\nErreur globale: " + err.message;
+                this.innerText = "❌ ERREUR";
             }
-        }
+        };
 
         init();
     </script>
