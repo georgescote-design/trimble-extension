@@ -2,11 +2,12 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Filtre BIM Georges - Pur Viewer</title>
+    <title>Filtre BIM Georges - Stable</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
         body { font-family: sans-serif; padding: 15px; background: white; }
         .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h3 { margin-top: 0; color: #333; font-size: 15px; }
         button { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
         #status { font-size: 11px; color: #666; margin-bottom: 10px; background: #f0f0f0; padding: 5px; border-radius: 3px; min-height: 20px; }
         select { width: 100%; margin-top: 15px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
@@ -15,11 +16,11 @@
 </head>
 <body>
     <div class="card">
-        <h3>Explorateur Pur Viewer</h3>
-        <div id="status">⏳ Initialisation...</div>
-        <button id="btn-scan">SCANNER TOUT</button>
+        <h3>Filtre : 01_MANILA w PARAMETRIC</h3>
+        <div id="status">✅ Prêt (Pur Viewer)</div>
+        <button id="btn-scan">SCANNER LA SÉLECTION</button>
         <div id="ui-filter" style="display:none;">
-            <select id="prop-selector"></select>
+            <select id="prop-selector" style="margin-top:10px;"></select>
             <div id="results" style="margin-top:10px;"></div>
         </div>
     </div>
@@ -27,58 +28,71 @@
     <script>
         let API = null;
         let selectionData = [];
+        const TARGET_SET = "01_MANILA w PARAMETRIC";
 
         async function init() {
             try {
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-                document.getElementById('status').innerText = "✅ Prêt (Viewer Only)";
-            } catch (e) { document.getElementById('status').innerText = "❌ Erreur de connexion"; }
+                // On ne demande pas de permission "read" ou "readwrite" car ça a causé un échec
+                // On utilise la connexion de base qui affichait "Système prêt"
+            } catch (e) { console.error("Erreur init:", e); }
         }
 
         document.getElementById('btn-scan').onclick = async function() {
             const btn = this;
             const status = document.getElementById('status');
-            btn.innerText = "⏳ LECTURE...";
+            
+            if (!API || !API.viewer) {
+                status.innerText = "❌ API Viewer non disponible";
+                return;
+            }
+
+            btn.innerText = "⏳ ANALYSE BIM...";
             
             try {
-                // Étape 1 : Récupérer les IDs (Viewer uniquement)
+                // ÉTAPE 1 : RÉCUPÉRATION ET NETTOYAGE DES IDs (Solution au [object Object])
                 const rawSelection = await API.viewer.getSelection();
-                const ids = rawSelection.map(item => (typeof item === 'object' ? (item.id || item.runtimeId) : item));
+                const ids = (rawSelection || []).map(item => {
+                    if (typeof item === 'string') return item;
+                    return item.id || item.runtimeId || item.objectId;
+                }).filter(id => id !== undefined);
 
-                if (!ids || ids.length === 0) {
-                    status.innerText = "⚠️ Sélectionnez un objet !";
-                    btn.innerText = "SCANNER TOUT";
+                if (ids.length === 0) {
+                    status.innerText = "⚠️ Sélectionnez l'objet AVANT de cliquer !";
+                    btn.innerText = "SCANNER LA SÉLECTION";
                     return;
                 }
 
-                // Étape 2 : Récupérer les propriétés (Viewer uniquement)
+                // ÉTAPE 2 : RÉCUPÉRATION DES PROPRIÉTÉS (Seulement via Viewer)
                 // Commande exacte : getObjectProperties
                 selectionData = await API.viewer.getObjectProperties(ids);
                 
                 const props = new Set();
                 selectionData.forEach(obj => {
-                    // On scanne les propriétés racines
-                    if (obj.properties) Object.keys(obj.properties).forEach(k => props.add(k));
-                    
-                    // On scanne TOUS les PropertySets
+                    // On cherche spécifiquement dans ton groupe Manila
                     if (obj.propertySets) {
                         obj.propertySets.forEach(ps => {
-                            if (ps.properties) Object.keys(ps.properties).forEach(k => props.add(k));
+                            if (ps.name && ps.name.trim() === TARGET_SET && ps.properties) {
+                                Object.keys(ps.properties).forEach(k => props.add(k));
+                            }
                         });
                     }
+                    // Sécurité : propriétés racines
+                    if (obj.properties) Object.keys(obj.properties).forEach(k => props.add(k));
                 });
 
                 if (props.size > 0) {
                     const sel = document.getElementById('prop-selector');
-                    sel.innerHTML = '<option value="">-- ' + props.size + ' Paramètres --</option>';
+                    sel.innerHTML = '<option value="">-- ' + props.size + ' Paramètres détectés --</option>';
                     Array.from(props).sort().forEach(p => sel.innerHTML += `<option value="${p}">${p}</option>`);
                     document.getElementById('ui-filter').style.display = "block";
                     btn.innerText = "✅ SCAN RÉUSSI";
                     btn.style.backgroundColor = "#107c10";
-                    status.innerText = "✅ " + ids.length + " objets lus.";
+                    status.innerText = "✅ " + ids.length + " objets prêts.";
                 } else {
-                    btn.innerText = "⚠️ VIDE";
-                    status.innerText = "Aucun paramètre trouvé dans le Viewer.";
+                    btn.innerText = "⚠️ AUCUNE DONNÉE";
+                    status.innerText = "IDs ok, mais les valeurs Manila sont vides.";
+                    btn.style.backgroundColor = "#666";
                 }
             } catch (err) {
                 status.innerText = "Erreur: " + err.message;
@@ -86,6 +100,7 @@
             }
         };
 
+        // FILTRAGE ET VISIBILITÉ (Correction Copilot : viewer + async)
         document.getElementById('prop-selector').onchange = (e) => {
             const p = e.target.value;
             const res = document.getElementById('results');
@@ -95,23 +110,30 @@
             const groups = {};
             selectionData.forEach(o => {
                 let v = "Inconnu";
-                if (o.properties && o.properties[p] !== undefined) v = o.properties[p];
-                else if (o.propertySets) {
+                if (o.propertySets) {
                     o.propertySets.forEach(ps => {
-                        if (ps.properties && ps.properties[p] !== undefined) v = ps.properties[p];
+                        if (ps.name && ps.name.trim() === TARGET_SET && ps.properties && ps.properties[p] !== undefined) {
+                            v = ps.properties[p];
+                        }
                     });
                 }
+                if (v === "Inconnu" && o.properties && o.properties[p] !== undefined) v = o.properties[p];
+                
                 if(!groups[v]) groups[v] = [];
-                groups[v].push(o.id || o.runtimeId);
+                // On utilise runtimeId ou id pour la visibilité
+                groups[v].push(o.runtimeId || o.id);
             });
 
             Object.keys(groups).sort().forEach(v => {
                 const div = document.createElement('div');
                 div.className = "row";
                 div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v} (${groups[v].length})</span>`;
+                
                 div.querySelector('input').onchange = async (ev) => {
-                    // Commande de visibilité Viewer
-                    await API.viewer.setObjectVisibility(groups[v], ev.target.checked);
+                    try {
+                        // Utilisation du module Viewer (Copilot)
+                        await API.viewer.setObjectVisibility(groups[v], ev.target.checked);
+                    } catch (err) { console.error("Erreur visibilité:", err); }
                 };
                 res.appendChild(div);
             });
