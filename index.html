@@ -10,12 +10,9 @@
         .card { border: 2px solid #2c3e50; padding: 15px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         h3 { margin-top: 0; color: #2c3e50; font-size: 16px; }
         #status { font-size: 12px; padding: 8px; background: #ecf0f1; border-radius: 4px; margin-bottom: 15px; color: #34495e; }
-        
-        /* Bouton cliquable indestructible */
         .upload-label { display: block; border: 2px dashed #3498db; border-radius: 8px; padding: 25px 10px; text-align: center; background: #ebf5fb; color: #2980b9; cursor: pointer; transition: all 0.3s ease; margin-bottom: 15px; font-weight: bold; font-size: 13px; }
         .upload-label:hover { background: #3498db; color: white; border-color: #2980b9; transform: scale(1.02); }
-        #file-input { display: none; } /* On cache le moche bouton par défaut */
-
+        #file-input { display: none; }
         select { width: 100%; padding: 10px; border: 2px solid #3498db; border-radius: 4px; margin-bottom: 10px; font-size: 13px; }
         .row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 13px; }
         .count { color: #7f8c8d; font-weight: bold; margin-left: 5px; font-size: 11px; }
@@ -49,15 +46,9 @@
             } catch (e) { document.getElementById('status').innerText = "❌ Erreur de connexion au viewer."; }
         }
 
-        // --- TRAITEMENT DU FICHIER CSV LORS DU CLIC ---
         document.getElementById('file-input').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
-
-            if (!file.name.endsWith('.csv')) {
-                document.getElementById('status').innerText = "⚠️ Veuillez utiliser un fichier .csv";
-                return;
-            }
 
             const status = document.getElementById('status');
             const uploadZone = document.getElementById('upload-zone');
@@ -82,18 +73,28 @@
                     headers.forEach(h => { if (h !== guidColumnName) menu.innerHTML += `<option value="${h}">${h}</option>`; });
 
                     document.getElementById('ui-filter').style.display = "block";
-                    uploadZone.style.display = "none"; // On cache le gros bouton après le chargement
+                    uploadZone.style.display = "none";
                     status.innerText = `✅ Données chargées (${tableData.length} objets).`;
                 }
             });
         });
 
-        // --- FILTRAGE 3D (AVEC LE TRADUCTEUR D'ID) ---
-        document.getElementById('prop-selector').onchange = (e) => {
+        document.getElementById('prop-selector').onchange = async (e) => {
             const selectedCol = e.target.value;
             const res = document.getElementById('results');
-            res.innerHTML = "";
-            if (!selectedCol) return;
+            res.innerHTML = "⏳ Préparation du filtre...";
+            if (!selectedCol) { res.innerHTML = ""; return; }
+
+            // NOUVEAU : On demande à Trimble "Quel est le modèle 3D actuellement ouvert ?"
+            let currentModelId = "";
+            try {
+                const models = await API.viewer.getModels();
+                if (models && models.length > 0) {
+                    currentModelId = models[0].id || models[0].modelId;
+                }
+            } catch (err) {
+                console.error("Impossible de lire le modèle", err);
+            }
 
             const groups = {};
             tableData.forEach(row => {
@@ -101,6 +102,8 @@
                 if (!groups[val]) groups[val] = [];
                 if (row[guidColumnName]) groups[val].push(row[guidColumnName]);
             });
+
+            res.innerHTML = ""; // On vide le message d'attente
 
             Object.keys(groups).sort().forEach(val => {
                 const div = document.createElement('div');
@@ -113,10 +116,15 @@
                         const isChecked = ev.target.checked;
                         const guidsBruts = groups[val];
 
-                        // 1. LA TRADUCTION : CSV GUIDs -> Viewer IDs
-                        const runtimeIds = await API.viewer.convertToObjectRuntimeIds(guidsBruts);
+                        // LE FIX EST ICI : On ajoute le "nom de la ville" (modelId) à chaque numéro de poutre
+                        const objectsToTranslate = guidsBruts.map(guid => {
+                            return { modelId: currentModelId, objectId: guid };
+                        });
 
-                        // 2. LE MASQUAGE : Utilisation de l'opacité
+                        // 1. La Traduction complète
+                        const runtimeIds = await API.viewer.convertToObjectRuntimeIds(objectsToTranslate);
+
+                        // 2. Le Masquage
                         if (runtimeIds && runtimeIds.length > 0) {
                             await API.viewer.setOpacity(runtimeIds, isChecked ? 1 : 0);
                         }
