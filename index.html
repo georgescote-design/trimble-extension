@@ -2,11 +2,12 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Filtre BIM Georges - Fix Final</title>
+    <title>Filtre BIM Georges - Optimisé</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
         body { font-family: sans-serif; padding: 15px; background: white; }
         .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h3 { margin-top: 0; color: #333; font-size: 16px; }
         button { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
         #status { font-size: 11px; color: #666; margin-bottom: 10px; background: #f0f0f0; padding: 5px; border-radius: 3px; min-height: 20px; }
         select { width: 100%; margin-top: 15px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
@@ -15,8 +16,8 @@
 </head>
 <body>
     <div class="card">
-        <h3>Filtre : 01_MANILA</h3>
-        <div id="status">✅ Prêt</div>
+        <h3>Filtre : 01_MANILA w PARAMETRIC</h3>
+        <div id="status">⏳ Initialisation...</div>
         <button id="btn-scan">SCANNER LA SÉLECTION</button>
         <div id="ui-filter" style="display:none;">
             <select id="prop-selector" style="margin-top:10px;"></select>
@@ -27,35 +28,52 @@
     <script>
         let API = null;
         let selectionData = [];
+        const TARGET_SET = "01_MANILA w PARAMETRIC";
 
+        // 1. Initialisation avec permissions corrigées (Copilot)
         async function init() {
+            const status = document.getElementById('status');
             try {
                 API = await TrimbleConnectWorkspace.connect(window.parent);
                 if(API.extension && API.extension.requestPermission) {
-                    await API.extension.requestPermission("accesstoken");
+                    // Test de la permission "read" pour les données
+                    await API.extension.requestPermission("read");
                 }
-            } catch (e) { console.error(e); }
+                status.innerText = "✅ Prêt (API Connectée)";
+            } catch (e) { 
+                status.innerText = "❌ Échec de connexion API";
+                console.error(e); 
+            }
         }
 
         document.getElementById('btn-scan').onclick = async function() {
             const btn = this;
             const status = document.getElementById('status');
+            
+            // Validation d'API (Copilot)
+            if (!API || !API.viewer) {
+                status.innerText = "❌ API non initialisée";
+                return;
+            }
+
             btn.innerText = "⏳ SCAN EN COURS...";
+            btn.style.backgroundColor = "#ff9800";
             
             try {
                 const rawSelection = await API.viewer.getSelection();
-                // FIX CRUCIAL: Extraction de l'ID pur, que ce soit un objet ou une chaîne
+                // Extraction ID robuste (Gemini)
                 const ids = rawSelection.map(item => (typeof item === 'object' ? (item.id || item.runtimeId || item.objectId) : item));
 
                 if (!ids || ids.length === 0 || !ids[0]) {
-                    status.innerText = "⚠️ Sélectionnez des objets en 3D !";
+                    status.innerText = "⚠️ Sélectionnez des objets d'abord !";
                     btn.innerText = "SCANNER LA SÉLECTION";
+                    btn.style.backgroundColor = "#0078d4";
                     return;
                 }
 
                 status.innerText = "Analyse de " + ids.length + " objets...";
 
-                // Tentative multi-modules
+                // Tentative multi-modules pour les propriétés
                 let results = [];
                 try {
                     results = await API.viewer.getObjectProperties(ids);
@@ -67,31 +85,35 @@
                 const props = new Set();
                 
                 selectionData.forEach(obj => {
-                    if (obj.properties) Object.keys(obj.properties).forEach(k => props.add(k));
                     if (obj.propertySets) {
                         obj.propertySets.forEach(ps => {
-                            if (ps.properties) Object.keys(ps.properties).forEach(k => props.add(k));
+                            if (ps.name && ps.name.trim() === TARGET_SET && ps.properties) {
+                                Object.keys(ps.properties).forEach(k => props.add(k));
+                            }
                         });
                     }
+                    if (obj.properties) Object.keys(obj.properties).forEach(k => props.add(k));
                 });
 
                 if (props.size > 0) {
                     const sel = document.getElementById('prop-selector');
-                    sel.innerHTML = '<option value="">-- ' + props.size + ' Paramètres --</option>';
+                    sel.innerHTML = '<option value="">-- ' + props.size + ' Paramètres Manila --</option>';
                     Array.from(props).sort().forEach(p => sel.innerHTML += `<option value="${p}">${p}</option>`);
                     document.getElementById('ui-filter').style.display = "block";
                     btn.innerText = "✅ SCAN RÉUSSI";
                     btn.style.backgroundColor = "#107c10";
                 } else {
-                    btn.innerText = "⚠️ AUCUNE DONNÉE";
-                    status.innerText = "IDs extraits mais propriétés vides. Vérifiez l'onglet Manila.";
+                    btn.innerText = "⚠️ DONNÉES INVISIBLES";
+                    status.innerText = "Vérifiez que le tableau Manila est ouvert.";
                 }
 
             } catch (err) {
                 status.innerText = "Erreur: " + err.message;
+                btn.innerText = "❌ ERREUR";
             }
         };
 
+        // 2. Gestion async de la visibilité (Copilot)
         document.getElementById('prop-selector').onchange = (e) => {
             const p = e.target.value;
             const res = document.getElementById('results');
@@ -100,12 +122,15 @@
 
             selectionData.forEach(o => {
                 let v = "Inconnu";
-                if (o.properties && o.properties[p] !== undefined) v = o.properties[p];
-                else if (o.propertySets) {
+                if (o.propertySets) {
                     o.propertySets.forEach(ps => {
-                        if (ps.properties && ps.properties[p] !== undefined) v = ps.properties[p];
+                        if (ps.name && ps.name.trim() === TARGET_SET && ps.properties && ps.properties[p] !== undefined) {
+                            v = ps.properties[p];
+                        }
                     });
                 }
+                if (v === "Inconnu" && o.properties && o.properties[p] !== undefined) v = o.properties[p];
+                
                 if(!groups[v]) groups[v] = [];
                 groups[v].push(o.id);
             });
@@ -114,10 +139,21 @@
                 const div = document.createElement('div');
                 div.className = "row";
                 div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v} (${groups[v].length})</span>`;
-                div.querySelector('input').onchange = (ev) => API.view.setObjectVisibility(groups[v], ev.target.checked);
+                
+                // Correction Async + Viewer (Copilot)
+                div.querySelector('input').onchange = async (ev) => {
+                    try {
+                        if(API && API.viewer) {
+                            await API.viewer.setObjectVisibility(groups[v], ev.target.checked);
+                        }
+                    } catch (err) {
+                        console.error("Erreur visibilité:", err);
+                    }
+                };
                 res.appendChild(div);
             });
         };
+
         init();
     </script>
 </body>
