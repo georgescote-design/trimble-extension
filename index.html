@@ -1,4 +1,4 @@
-À l'avenir, réponds-moi toujours avec des explications techniques détaillées<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
@@ -65,7 +65,6 @@
                     tableData = results.data;
                     const headers = results.meta.fields;
                     
-                    // Trouver la colonne GUID
                     guidColumnName = headers.find(h => h.toUpperCase().includes("GUID"));
                     
                     if (!guidColumnName) {
@@ -73,7 +72,6 @@
                         return;
                     }
 
-                    // Remplir le menu déroulant
                     const menu = document.getElementById('prop-selector');
                     menu.innerHTML = '<option value="">-- Sélectionnez un paramètre --</option>';
                     headers.forEach(h => { 
@@ -89,7 +87,7 @@
             });
         });
 
-        // 3. Action quand on choisit un paramètre
+        // 3. Filtrage avec la BONNE commande de ciblage
         document.getElementById('prop-selector').onchange = async (e) => {
             const selectedCol = e.target.value;
             const res = document.getElementById('results');
@@ -103,9 +101,8 @@
                 if (row[guidColumnName]) groups[val].push(row[guidColumnName]);
             });
 
-            res.innerHTML = ""; // On efface le message d'attente
+            res.innerHTML = "";
 
-            // Création des cases à cocher
             Object.keys(groups).sort().forEach(val => {
                 const div = document.createElement('div');
                 div.className = "row";
@@ -117,11 +114,10 @@
                         const isChecked = ev.target.checked;
                         const guidsBruts = groups[val];
 
-                        // --- LE FIX ANTI-CRASH AVEC ÉTIQUETAGE DU MODÈLE ---
                         const models = await API.viewer.getModels();
                         let objectsToModify = [];
 
-                        // On teste les GUIDs dans chaque modèle, un par un
+                        // Traduction des GUIDs en Runtime IDs (avec l'étiquette du modèle)
                         for (const model of models) {
                             const mId = model.id || model.modelId;
                             if (!mId) continue;
@@ -129,22 +125,24 @@
                             try {
                                 const rIds = await API.viewer.convertToObjectRuntimeIds(mId, guidsBruts);
                                 if (rIds && rIds.length > 0) {
-                                    // LA MAGIE EST LÀ : On recolle l'étiquette du modèle sur chaque numéro
                                     const formattedObjects = rIds.map(rId => {
                                         return { modelId: mId, runtimeId: rId };
                                     });
                                     objectsToModify = objectsToModify.concat(formattedObjects);
                                 }
                             } catch (err) {
-                                // Si le modèle ne connaît pas l'objet, on l'ignore silencieusement
+                                // On ignore silencieusement si la pièce n'est pas dans ce modèle précis
                             }
                         }
 
-                        // Une fois qu'on a les objets avec leurs étiquettes parfaites, on masque
+                        // --- LE FIX ULTIME EST ICI ---
+                        // On utilise setObjectState au lieu de setOpacity pour cibler UNIQUEMENT ces pièces
                         if (objectsToModify.length > 0) {
-                            await API.viewer.setOpacity(objectsToModify, isChecked ? 1 : 0);
+                            // Si c'est coché, on remet l'opacité à 100%. Si c'est décoché, on la met à 0.
+                            const newState = { opacity: isChecked ? 100 : 0 };
+                            await API.viewer.setObjectState(objectsToModify, newState);
                         } else {
-                            console.warn("Aucun objet trouvé à masquer dans les modèles actifs.");
+                            console.warn("Aucun objet trouvé à masquer.");
                         }
 
                     } catch (error) {
