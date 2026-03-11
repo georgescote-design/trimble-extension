@@ -2,21 +2,25 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Filtre BIM Georges - Fix Final</title>
+    <title>Filtre BIM Georges</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
         body { font-family: sans-serif; padding: 15px; }
-        .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; }
-        #status { font-size: 11px; padding: 8px; background: #f0f0f0; margin-bottom: 10px; border-radius: 4px; }
-        select { width: 100%; padding: 8px; border: 1px solid #0078d4; border-radius: 4px; }
+        .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        #btn-scan { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
+        #status { font-size: 11px; padding: 8px; background: #f0f0f0; border-radius: 4px; margin-bottom: 10px; min-height: 15px; }
+        select { width: 100%; padding: 10px; border: 2px solid #0078d4; border-radius: 4px; }
         .row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 12px; }
     </style>
 </head>
 <body>
     <div class="card">
-        <div id="status">⏳ Connexion...</div>
-        <div id="ui" style="display:none;">
-            <p style="font-size:11px">Sélectionnez vos objets en 3D :</p>
+        <h3>Filtre : 01_MANILA</h3>
+        <div id="status">⏳ Initialisation...</div>
+        <button id="btn-scan">1. ANALYSER LA SÉLECTION</button>
+        
+        <div id="ui-filter" style="display:none;">
+            <p style="font-size:11px; margin-bottom:5px;">2. Choisir un paramètre :</p>
             <select id="prop-selector"></select>
             <div id="results" style="margin-top:10px;"></div>
         </div>
@@ -24,69 +28,94 @@
 
     <script>
         let API = null;
-        let lastSelectionStr = "";
         let currentData = [];
+        const TARGET_SET = "01_MANILA w PARAMETRIC";
 
         async function init() {
             try {
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-                document.getElementById('status').innerText = "✅ Connecté. Sélectionnez 1 objet.";
-                document.getElementById('ui').style.display = "block";
-                startMonitoring();
-            } catch (e) { document.getElementById('status').innerText = "❌ Erreur"; }
+                document.getElementById('status').innerText = "✅ Système prêt.";
+            } catch (e) { document.getElementById('status').innerText = "❌ Erreur de connexion."; }
         }
 
-        function startMonitoring() {
-            setInterval(async () => {
-                try {
-                    const sel = await API.viewer.getSelection();
-                    const selStr = JSON.stringify(sel);
-                    if (sel && sel.length > 0 && selStr !== lastSelectionStr) {
-                        lastSelectionStr = selStr;
-                        // --- LA TRADUCTION ---
-                        // On utilise convertToObjectIds que nous avons vu dans ta liste
-                        const ids = await API.viewer.convertToObjectIds(sel);
-                        analyze(ids);
-                    }
-                } catch (e) {}
-            }, 1000);
-        }
-
-        async function analyze(ids) {
+        document.getElementById('btn-scan').onclick = async function() {
             const status = document.getElementById('status');
-            status.innerText = "⏳ Analyse de " + ids.length + " objets...";
+            this.innerText = "⏳ RECHERCHE BIM...";
+            
             try {
-                // On demande les propriétés avec les vrais IDs
+                // 1. Récupérer la sélection brute
+                const rawSelection = await API.viewer.getSelection();
+                
+                if (!rawSelection || rawSelection.length === 0) {
+                    status.innerText = "⚠️ RIEN N'EST SÉLECTIONNÉ EN JAUNE !";
+                    this.innerText = "1. ANALYSER LA SÉLECTION";
+                    return;
+                }
+
+                // 2. Transformer les objets [object Object] en IDs purs
+                // On utilise la méthode de conversion que ta console affichait
+                let ids = [];
+                try {
+                    ids = await API.viewer.convertToObjectIds(rawSelection);
+                } catch(e) {
+                    // Fallback manuel si la fonction échoue
+                    ids = rawSelection.map(item => typeof item === 'object' ? (item.id || item.runtimeId) : item);
+                }
+
+                status.innerText = "✅ " + ids.length + " objets détectés. Lecture du dossier Manila...";
+
+                // 3. Lire les propriétés
                 currentData = await API.viewer.getObjectProperties(ids);
+                
                 const props = new Set();
-                currentData.forEach(o => {
-                    if (o.propertySets) o.propertySets.forEach(ps => {
-                        if (ps.properties) Object.keys(ps.properties).forEach(k => props.add(k));
-                    });
-                    if (o.properties) Object.keys(o.properties).forEach(k => props.add(k));
+                currentData.forEach(obj => {
+                    // On cherche spécifiquement dans le groupe Manila que tu as entouré
+                    if (obj.propertySets) {
+                        obj.propertySets.forEach(ps => {
+                            if (ps.name && ps.name.includes("MANILA") && ps.properties) {
+                                Object.keys(ps.properties).forEach(k => props.add(k));
+                            }
+                        });
+                    }
+                    // Sécurité : on prend aussi les propriétés de base
+                    if (obj.properties) Object.keys(obj.properties).forEach(k => props.add(k));
                 });
 
-                const menu = document.getElementById('prop-selector');
-                menu.innerHTML = '<option value="">-- ' + props.size + ' Paramètres trouvés --</option>';
-                Array.from(props).sort().forEach(p => menu.innerHTML += `<option value="${p}">${p}</option>`);
-                status.innerText = "✅ " + currentData.length + " objets prêts.";
-            } catch (err) { status.innerText = "❌ Erreur : " + err.message; }
-        }
+                if (props.size > 0) {
+                    const menu = document.getElementById('prop-selector');
+                    menu.innerHTML = '<option value="">-- ' + props.size + ' Paramètres trouvés --</option>';
+                    Array.from(props).sort().forEach(p => menu.innerHTML += `<option value="${p}">${p}</option>`);
+                    
+                    document.getElementById('ui-filter').style.display = "block";
+                    status.innerText = "✅ Analyse terminée.";
+                    this.innerText = "ANALYSE RÉUSSIE";
+                    this.style.backgroundColor = "#107c10";
+                } else {
+                    status.innerText = "⚠️ Les objets n'ont pas de données Manila lisibles.";
+                    this.innerText = "1. ANALYSER LA SÉLECTION";
+                }
+            } catch (err) {
+                status.innerText = "❌ Erreur : " + err.message;
+            }
+        };
 
         document.getElementById('prop-selector').onchange = (e) => {
             const p = e.target.value;
             const res = document.getElementById('results');
             res.innerHTML = "";
+            if (!p) return;
+
             const groups = {};
-            
             currentData.forEach(o => {
                 let val = "Inconnu";
-                if (o.propertySets) o.propertySets.forEach(ps => {
-                    if (ps.properties && ps.properties[p] !== undefined) val = ps.properties[p];
-                });
+                if (o.propertySets) {
+                    o.propertySets.forEach(ps => {
+                        if (ps.properties && ps.properties[p] !== undefined) val = ps.properties[p];
+                    });
+                }
                 if (val === "Inconnu" && o.properties && o.properties[p] !== undefined) val = o.properties[p];
+                
                 if (!groups[val]) groups[val] = [];
-                // On utilise runtimeId pour l'opacité
                 groups[val].push(o.runtimeId || o.id);
             });
 
@@ -95,12 +124,13 @@
                 div.className = "row";
                 div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v} (${groups[v].length})</span>`;
                 div.querySelector('input').onchange = async (ev) => {
-                    // Visibilité par opacité (vu dans ta liste)
+                    // On utilise setOpacity car c'était dans ta liste de fonctions valides !
                     await API.viewer.setOpacity(groups[v], ev.target.checked ? 1 : 0);
                 };
                 res.appendChild(div);
             });
         };
+
         init();
     </script>
 </body>
