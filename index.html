@@ -7,7 +7,7 @@
     <style>
         body { font-family: sans-serif; padding: 15px; background: white; }
         .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        h3 { margin-top: 0; color: #333; font-size: 16px; }
+        h3 { margin-top: 0; color: #333; font-size: 15px; }
         button { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
         #status { font-size: 11px; color: #666; margin-bottom: 10px; background: #f0f0f0; padding: 5px; border-radius: 3px; min-height: 20px; }
         select { width: 100%; margin-top: 15px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
@@ -17,7 +17,7 @@
 <body>
     <div class="card">
         <h3>Filtre : 01_MANILA w PARAMETRIC</h3>
-        <div id="status">⏳ Initialisation...</div>
+        <div id="status">✅ Prêt</div>
         <button id="btn-scan">SCANNER LA SÉLECTION</button>
         <div id="ui-filter" style="display:none;">
             <select id="prop-selector" style="margin-top:10px;"></select>
@@ -31,47 +31,52 @@
         const TARGET_SET = "01_MANILA w PARAMETRIC";
 
         async function init() {
-            const status = document.getElementById('status');
             try {
-                // Retour à la connexion simple qui fonctionnait
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-                status.innerText = "✅ Système prêt";
-            } catch (e) { 
-                status.innerText = "❌ Échec de connexion API";
-                console.error(e); 
-            }
+                document.getElementById('status').innerText = "✅ Système prêt";
+            } catch (e) { console.error(e); }
         }
 
         document.getElementById('btn-scan').onclick = async function() {
             const btn = this;
             const status = document.getElementById('status');
-            
-            if (!API || !API.viewer) {
-                status.innerText = "❌ API non disponible";
-                return;
-            }
-
-            btn.innerText = "⏳ ANALYSE...";
-            btn.style.backgroundColor = "#ff9800";
+            btn.innerText = "⏳ SCAN EN COURS...";
             
             try {
-                const rawSelection = await API.viewer.getSelection();
-                // Extraction ID robuste
-                const ids = rawSelection.map(item => (typeof item === 'object' ? (item.id || item.runtimeId || item.objectId) : item));
+                // 1. On tente de récupérer la sélection
+                let rawSelection = await API.viewer.getSelection();
+                
+                // Si vide, on attend 200ms et on réessaie (parfois le clic est trop rapide)
+                if (!rawSelection || rawSelection.length === 0) {
+                    await new Promise(r => setTimeout(r, 200));
+                    rawSelection = await API.viewer.getSelection();
+                }
 
-                if (!ids || ids.length === 0 || !ids[0]) {
-                    status.innerText = "⚠️ Sélectionnez des objets d'abord !";
+                if (!rawSelection || rawSelection.length === 0) {
+                    status.innerText = "⚠️ Cliquez sur l'objet AVANT le bouton !";
                     btn.innerText = "SCANNER LA SÉLECTION";
-                    btn.style.backgroundColor = "#0078d4";
                     return;
                 }
 
+                // Extraction ID avec nettoyage profond
+                const ids = rawSelection.map(item => {
+                    if (typeof item === 'string') return item;
+                    return item.id || item.runtimeId || item.objectId;
+                }).filter(id => id !== undefined);
+
                 status.innerText = "Analyse de " + ids.length + " objets...";
 
-                // Utilisation de getObjectProperties (confirmé par nos tests précédents)
-                selectionData = await API.viewer.getObjectProperties(ids);
+                // 2. On essaie de récupérer les propriétés (viewer puis project)
+                let results = [];
+                try {
+                    results = await API.viewer.getObjectProperties(ids);
+                } catch(e) {
+                    results = await API.project.getProperties(ids);
+                }
                 
+                selectionData = results || [];
                 const props = new Set();
+                
                 selectionData.forEach(obj => {
                     if (obj.propertySets) {
                         obj.propertySets.forEach(ps => {
@@ -92,14 +97,13 @@
                     btn.style.backgroundColor = "#107c10";
                 } else {
                     btn.innerText = "⚠️ AUCUNE DONNÉE";
-                    status.innerText = "Vérifiez que le tableau Manila est ouvert.";
+                    status.innerText = "Sélection OK, mais Manila non trouvé sur ces objets.";
                     btn.style.backgroundColor = "#666";
                 }
 
             } catch (err) {
                 status.innerText = "Erreur: " + err.message;
                 btn.innerText = "❌ ERREUR";
-                btn.style.backgroundColor = "#d13438";
             }
         };
 
@@ -122,7 +126,7 @@
                 if (v === "Inconnu" && o.properties && o.properties[p] !== undefined) v = o.properties[p];
                 
                 if(!groups[v]) groups[v] = [];
-                groups[v].push(o.id);
+                groups[v].push(o.id || o.runtimeId);
             });
 
             Object.keys(groups).sort().forEach(v => {
@@ -130,14 +134,13 @@
                 div.className = "row";
                 div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v} (${groups[v].length})</span>`;
                 
-                // On garde la correction de Copilot pour la commande de visibilité
                 div.querySelector('input').onchange = async (ev) => {
                     try {
-                        // On tente viewer (Copilot) puis view (Original)
+                        const targetIds = groups[v];
                         if (API.viewer && API.viewer.setObjectVisibility) {
-                            await API.viewer.setObjectVisibility(groups[v], ev.target.checked);
-                        } else {
-                            await API.view.setObjectVisibility(groups[v], ev.target.checked);
+                            await API.viewer.setObjectVisibility(targetIds, ev.target.checked);
+                        } else if (API.view && API.view.setObjectVisibility) {
+                            await API.view.setObjectVisibility(targetIds, ev.target.checked);
                         }
                     } catch (err) { console.error(err); }
                 };
