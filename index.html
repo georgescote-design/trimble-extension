@@ -2,25 +2,25 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Filtre BIM Georges</title>
+    <title>Filtre BIM Georges - Rayons X</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
         body { font-family: sans-serif; padding: 15px; }
-        .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        #btn-scan { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
+        .card { border: 2px solid #ff0000; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        #btn-scan { width: 100%; padding: 12px; background: #ff0000; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
         #status { font-size: 11px; padding: 8px; background: #f0f0f0; border-radius: 4px; margin-bottom: 10px; min-height: 15px; }
-        select { width: 100%; padding: 10px; border: 2px solid #0078d4; border-radius: 4px; }
+        select { width: 100%; padding: 10px; border: 2px solid #ff0000; border-radius: 4px; }
         .row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 12px; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h3>Filtre : 01_MANILA</h3>
+        <h3>Diagnostic Rayons X</h3>
         <div id="status">⏳ Initialisation...</div>
-        <button id="btn-scan">1. ANALYSER LA SÉLECTION</button>
+        <button id="btn-scan">1. SCANNER TOUT (SANS FILTRE)</button>
         
         <div id="ui-filter" style="display:none;">
-            <p style="font-size:11px; margin-bottom:5px;">2. Choisir un paramètre :</p>
+            <p style="font-size:11px; margin-bottom:5px;">2. Cherchez votre paramètre :</p>
             <select id="prop-selector"></select>
             <div id="results" style="margin-top:10px;"></div>
         </div>
@@ -29,7 +29,6 @@
     <script>
         let API = null;
         let currentData = [];
-        const TARGET_SET = "01_MANILA w PARAMETRIC";
 
         async function init() {
             try {
@@ -40,45 +39,39 @@
 
         document.getElementById('btn-scan').onclick = async function() {
             const status = document.getElementById('status');
-            this.innerText = "⏳ RECHERCHE BIM...";
+            this.innerText = "⏳ RECHERCHE GLOBALE...";
             
             try {
-                // 1. Récupérer la sélection brute
                 const rawSelection = await API.viewer.getSelection();
-                
                 if (!rawSelection || rawSelection.length === 0) {
-                    status.innerText = "⚠️ RIEN N'EST SÉLECTIONNÉ EN JAUNE !";
-                    this.innerText = "1. ANALYSER LA SÉLECTION";
+                    status.innerText = "⚠️ SÉLECTIONNEZ UN OBJET EN JAUNE !";
+                    this.innerText = "1. SCANNER TOUT";
                     return;
                 }
 
-                // 2. Transformer les objets [object Object] en IDs purs
-                // On utilise la méthode de conversion que ta console affichait
                 let ids = [];
                 try {
                     ids = await API.viewer.convertToObjectIds(rawSelection);
                 } catch(e) {
-                    // Fallback manuel si la fonction échoue
                     ids = rawSelection.map(item => typeof item === 'object' ? (item.id || item.runtimeId) : item);
                 }
 
-                status.innerText = "✅ " + ids.length + " objets détectés. Lecture du dossier Manila...";
-
-                // 3. Lire les propriétés
                 currentData = await API.viewer.getObjectProperties(ids);
-                
                 const props = new Set();
+                
+                // On fouille absolument partout et on note le nom du tiroir
                 currentData.forEach(obj => {
-                    // On cherche spécifiquement dans le groupe Manila que tu as entouré
                     if (obj.propertySets) {
                         obj.propertySets.forEach(ps => {
-                            if (ps.name && ps.name.includes("MANILA") && ps.properties) {
-                                Object.keys(ps.properties).forEach(k => props.add(k));
+                            const setName = ps.name ? ps.name : "Sans_Nom";
+                            if (ps.properties) {
+                                Object.keys(ps.properties).forEach(k => props.add(`[${setName}] ${k}`));
                             }
                         });
                     }
-                    // Sécurité : on prend aussi les propriétés de base
-                    if (obj.properties) Object.keys(obj.properties).forEach(k => props.add(k));
+                    if (obj.properties) {
+                        Object.keys(obj.properties).forEach(k => props.add(`[Base] ${k}`));
+                    }
                 });
 
                 if (props.size > 0) {
@@ -91,46 +84,15 @@
                     this.innerText = "ANALYSE RÉUSSIE";
                     this.style.backgroundColor = "#107c10";
                 } else {
-                    status.innerText = "⚠️ Les objets n'ont pas de données Manila lisibles.";
-                    this.innerText = "1. ANALYSER LA SÉLECTION";
+                    status.innerText = "⚠️ L'objet est littéralement vide de propriétés pour l'API.";
+                    this.innerText = "1. SCANNER TOUT";
                 }
             } catch (err) {
                 status.innerText = "❌ Erreur : " + err.message;
             }
         };
 
-        document.getElementById('prop-selector').onchange = (e) => {
-            const p = e.target.value;
-            const res = document.getElementById('results');
-            res.innerHTML = "";
-            if (!p) return;
-
-            const groups = {};
-            currentData.forEach(o => {
-                let val = "Inconnu";
-                if (o.propertySets) {
-                    o.propertySets.forEach(ps => {
-                        if (ps.properties && ps.properties[p] !== undefined) val = ps.properties[p];
-                    });
-                }
-                if (val === "Inconnu" && o.properties && o.properties[p] !== undefined) val = o.properties[p];
-                
-                if (!groups[val]) groups[val] = [];
-                groups[val].push(o.runtimeId || o.id);
-            });
-
-            Object.keys(groups).sort().forEach(v => {
-                const div = document.createElement('div');
-                div.className = "row";
-                div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v} (${groups[v].length})</span>`;
-                div.querySelector('input').onchange = async (ev) => {
-                    // On utilise setOpacity car c'était dans ta liste de fonctions valides !
-                    await API.viewer.setOpacity(groups[v], ev.target.checked ? 1 : 0);
-                };
-                res.appendChild(div);
-            });
-        };
-
+        // ... Le reste (onchange) n'a pas d'importance pour ce test ...
         init();
     </script>
 </body>
