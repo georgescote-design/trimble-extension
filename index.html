@@ -2,27 +2,23 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Filtre BIM Georges - Final</title>
+    <title>Filtre BIM Georges - Fix Final</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
-        body { font-family: sans-serif; padding: 15px; background: white; }
-        .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        h3 { margin-top: 0; color: #333; font-size: 14px; }
-        #status { font-size: 11px; padding: 8px; background: #f0f0f0; border-radius: 4px; margin-bottom: 10px; color: #444; }
-        select { width: 100%; padding: 8px; border: 1px solid #0078d4; border-radius: 4px; margin-top: 10px; }
+        body { font-family: sans-serif; padding: 15px; }
+        .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; }
+        #status { font-size: 11px; padding: 8px; background: #f0f0f0; margin-bottom: 10px; border-radius: 4px; }
+        select { width: 100%; padding: 8px; border: 1px solid #0078d4; border-radius: 4px; }
         .row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 12px; }
-        .count { color: #0078d4; font-weight: bold; margin-left: auto; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h3>Filtre Intelligent : 01_MANILA</h3>
-        <div id="status">⏳ Connexion à Trimble...</div>
-        
-        <div id="ui-container" style="display:none;">
-            <div style="font-size: 11px; color: #666;">1. Sélectionnez vos objets en 3D<br>2. Choisissez un paramètre :</div>
+        <div id="status">⏳ Connexion...</div>
+        <div id="ui" style="display:none;">
+            <p style="font-size:11px">Sélectionnez vos objets en 3D :</p>
             <select id="prop-selector"></select>
-            <div id="results" style="margin-top:15px;"></div>
+            <div id="results" style="margin-top:10px;"></div>
         </div>
     </div>
 
@@ -34,102 +30,77 @@
         async function init() {
             try {
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-                document.getElementById('status').innerText = "✅ Connecté. Sélectionnez des objets.";
-                document.getElementById('ui-container').style.display = "block";
-                
-                // Lancement de la surveillance automatique
+                document.getElementById('status').innerText = "✅ Connecté. Sélectionnez 1 objet.";
+                document.getElementById('ui').style.display = "block";
                 startMonitoring();
-            } catch (e) { document.getElementById('status').innerText = "❌ Erreur de connexion"; }
+            } catch (e) { document.getElementById('status').innerText = "❌ Erreur"; }
         }
 
-        // Surveille la sélection toutes les secondes
         function startMonitoring() {
             setInterval(async () => {
                 try {
                     const sel = await API.viewer.getSelection();
                     const selStr = JSON.stringify(sel);
-                    
-                    // Si la sélection a changé, on analyse
                     if (sel && sel.length > 0 && selStr !== lastSelectionStr) {
                         lastSelectionStr = selStr;
-                        analyzeSelection(sel);
+                        // --- LA TRADUCTION ---
+                        // On utilise convertToObjectIds que nous avons vu dans ta liste
+                        const ids = await API.viewer.convertToObjectIds(sel);
+                        analyze(ids);
                     }
                 } catch (e) {}
             }, 1000);
         }
 
-        async function analyzeSelection(selection) {
+        async function analyze(ids) {
             const status = document.getElementById('status');
-            status.innerText = "⏳ Analyse de " + selection.length + " objets...";
-            
+            status.innerText = "⏳ Analyse de " + ids.length + " objets...";
             try {
-                // On récupère les propriétés (la fonction existe dans ta liste !)
-                const results = await API.viewer.getObjectProperties(selection);
-                currentData = results || [];
-                
+                // On demande les propriétés avec les vrais IDs
+                currentData = await API.viewer.getObjectProperties(ids);
                 const props = new Set();
-                currentData.forEach(obj => {
-                    // On scanne les dossiers de propriétés (Manila est là-dedans)
-                    if (obj.propertySets) {
-                        obj.propertySets.forEach(ps => {
-                            if (ps.properties) Object.keys(ps.properties).forEach(k => props.add(k));
-                        });
-                    }
-                    if (obj.properties) Object.keys(obj.properties).forEach(k => props.add(k));
+                currentData.forEach(o => {
+                    if (o.propertySets) o.propertySets.forEach(ps => {
+                        if (ps.properties) Object.keys(ps.properties).forEach(k => props.add(k));
+                    });
+                    if (o.properties) Object.keys(o.properties).forEach(k => props.add(k));
                 });
 
-                const selMenu = document.getElementById('prop-selector');
-                selMenu.innerHTML = '<option value="">-- ' + props.size + ' Paramètres trouvés --</option>';
-                Array.from(props).sort().forEach(p => {
-                    selMenu.innerHTML += `<option value="${p}">${p}</option>`;
-                });
-                
-                status.innerText = "✅ " + currentData.length + " objets analysés.";
-            } catch (err) {
-                status.innerText = "❌ Erreur : " + err.message;
-            }
+                const menu = document.getElementById('prop-selector');
+                menu.innerHTML = '<option value="">-- ' + props.size + ' Paramètres trouvés --</option>';
+                Array.from(props).sort().forEach(p => menu.innerHTML += `<option value="${p}">${p}</option>`);
+                status.innerText = "✅ " + currentData.length + " objets prêts.";
+            } catch (err) { status.innerText = "❌ Erreur : " + err.message; }
         }
 
         document.getElementById('prop-selector').onchange = (e) => {
             const p = e.target.value;
             const res = document.getElementById('results');
             res.innerHTML = "";
-            if (!p) return;
-
             const groups = {};
+            
             currentData.forEach(o => {
                 let val = "Inconnu";
-                if (o.propertySets) {
-                    o.propertySets.forEach(ps => {
-                        if (ps.properties && ps.properties[p] !== undefined) val = ps.properties[p];
-                    });
-                }
+                if (o.propertySets) o.propertySets.forEach(ps => {
+                    if (ps.properties && ps.properties[p] !== undefined) val = ps.properties[p];
+                });
                 if (val === "Inconnu" && o.properties && o.properties[p] !== undefined) val = o.properties[p];
-                
                 if (!groups[val]) groups[val] = [];
-                // On stocke l'objet complet pour la visibilité
-                groups[val].push(o.runtimeId || o.id || o);
+                // On utilise runtimeId pour l'opacité
+                groups[val].push(o.runtimeId || o.id);
             });
 
             Object.keys(groups).sort().forEach(v => {
                 const div = document.createElement('div');
                 div.className = "row";
-                div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v}</span> <span class="count">${groups[v].length}</span>`;
-                
+                div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v} (${groups[v].length})</span>`;
                 div.querySelector('input').onchange = async (ev) => {
-                    // Utilisation de isolateEntities si setObjectVisibility est capricieux
-                    if (ev.target.checked) {
-                        // On ré-affiche (ici on utilise setOpacity 1 ou toggle)
-                        await API.viewer.setOpacity(groups[v], 1);
-                    } else {
-                        // On masque (opacité 0)
-                        await API.viewer.setOpacity(groups[v], 0);
-                    }
+                    // Visibilité par opacité (vu dans ta liste)
+                    await API.viewer.setOpacity(groups[v], ev.target.checked ? 1 : 0);
                 };
                 res.appendChild(div);
             });
         };
-
         init();
     </script>
 </body>
