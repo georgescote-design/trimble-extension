@@ -2,97 +2,55 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Filtre BIM Georges - Rayons X</title>
+    <title>Cartographie API</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
-        body { font-family: sans-serif; padding: 15px; }
-        .card { border: 2px solid #ff0000; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        #btn-scan { width: 100%; padding: 12px; background: #ff0000; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px; }
-        #status { font-size: 11px; padding: 8px; background: #f0f0f0; border-radius: 4px; margin-bottom: 10px; min-height: 15px; }
-        select { width: 100%; padding: 10px; border: 2px solid #ff0000; border-radius: 4px; }
-        .row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 12px; }
+        body { font-family: sans-serif; padding: 15px; font-size: 12px; }
+        .card { border: 2px solid #333; padding: 15px; border-radius: 8px; background: #fff; }
+        #log-box { background: #1e1e1e; color: #d4d4d4; padding: 10px; height: 400px; overflow-y: auto; font-family: monospace; margin-top: 10px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word;}
+        .highlight { color: #569cd6; font-weight: bold; }
+        .func { color: #dcdcaa; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h3>Diagnostic Rayons X</h3>
-        <div id="status">⏳ Initialisation...</div>
-        <button id="btn-scan">1. SCANNER TOUT (SANS FILTRE)</button>
-        
-        <div id="ui-filter" style="display:none;">
-            <p style="font-size:11px; margin-bottom:5px;">2. Cherchez votre paramètre :</p>
-            <select id="prop-selector"></select>
-            <div id="results" style="margin-top:10px;"></div>
-        </div>
+        <h3 style="margin-top:0;">🔍 Cartographie Totale de l'API</h3>
+        <div id="status">⏳ Connexion...</div>
+        <div id="log-box">Recherche des modules en cours...</div>
     </div>
 
     <script>
-        let API = null;
-        let currentData = [];
-
         async function init() {
+            const logBox = document.getElementById('log-box');
             try {
-                API = await TrimbleConnectWorkspace.connect(window.parent);
-                document.getElementById('status').innerText = "✅ Système prêt.";
-            } catch (e) { document.getElementById('status').innerText = "❌ Erreur de connexion."; }
+                const API = await TrimbleConnectWorkspace.connect(window.parent);
+                document.getElementById('status').innerText = "✅ Connecté.";
+                
+                let output = "=== MODULES PRINCIPAUX ===\n";
+                const modules = Object.keys(API);
+                output += modules.join(", ") + "\n\n";
+
+                output += "=== DÉTAIL DES COMMANDES ===\n";
+                for (const mod of modules) {
+                    if (typeof API[mod] === 'object' && API[mod] !== null) {
+                        const funcs = Object.keys(API[mod]).filter(k => typeof API[mod][k] === 'function');
+                        if (funcs.length > 0) {
+                            output += `<span class="highlight">API.${mod}</span> dispose de ${funcs.length} commandes :\n`;
+                            output += `<span class="func">${funcs.join("\n ")}</span>\n\n`;
+                        } else {
+                            output += `<span class="highlight">API.${mod}</span> : (Aucune fonction directe)\n\n`;
+                        }
+                    }
+                }
+
+                logBox.innerHTML = output;
+
+            } catch (e) { 
+                document.getElementById('status').innerText = "❌ Erreur de connexion.";
+                logBox.innerText = e.message;
+            }
         }
 
-        document.getElementById('btn-scan').onclick = async function() {
-            const status = document.getElementById('status');
-            this.innerText = "⏳ RECHERCHE GLOBALE...";
-            
-            try {
-                const rawSelection = await API.viewer.getSelection();
-                if (!rawSelection || rawSelection.length === 0) {
-                    status.innerText = "⚠️ SÉLECTIONNEZ UN OBJET EN JAUNE !";
-                    this.innerText = "1. SCANNER TOUT";
-                    return;
-                }
-
-                let ids = [];
-                try {
-                    ids = await API.viewer.convertToObjectIds(rawSelection);
-                } catch(e) {
-                    ids = rawSelection.map(item => typeof item === 'object' ? (item.id || item.runtimeId) : item);
-                }
-
-                currentData = await API.viewer.getObjectProperties(ids);
-                const props = new Set();
-                
-                // On fouille absolument partout et on note le nom du tiroir
-                currentData.forEach(obj => {
-                    if (obj.propertySets) {
-                        obj.propertySets.forEach(ps => {
-                            const setName = ps.name ? ps.name : "Sans_Nom";
-                            if (ps.properties) {
-                                Object.keys(ps.properties).forEach(k => props.add(`[${setName}] ${k}`));
-                            }
-                        });
-                    }
-                    if (obj.properties) {
-                        Object.keys(obj.properties).forEach(k => props.add(`[Base] ${k}`));
-                    }
-                });
-
-                if (props.size > 0) {
-                    const menu = document.getElementById('prop-selector');
-                    menu.innerHTML = '<option value="">-- ' + props.size + ' Paramètres trouvés --</option>';
-                    Array.from(props).sort().forEach(p => menu.innerHTML += `<option value="${p}">${p}</option>`);
-                    
-                    document.getElementById('ui-filter').style.display = "block";
-                    status.innerText = "✅ Analyse terminée.";
-                    this.innerText = "ANALYSE RÉUSSIE";
-                    this.style.backgroundColor = "#107c10";
-                } else {
-                    status.innerText = "⚠️ L'objet est littéralement vide de propriétés pour l'API.";
-                    this.innerText = "1. SCANNER TOUT";
-                }
-            } catch (err) {
-                status.innerText = "❌ Erreur : " + err.message;
-            }
-        };
-
-        // ... Le reste (onchange) n'a pas d'importance pour ce test ...
         init();
     </script>
 </body>
