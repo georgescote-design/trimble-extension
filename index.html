@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Filtre BIM Georges</title>
+    <title>Filtre BIM Georges - Explorateur</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
         body { font-family: sans-serif; padding: 15px; background: white; }
@@ -16,11 +16,12 @@
 </head>
 <body>
     <div class="card">
-        <h3>Filtre : 01_MANILA w PARAMETRIC</h3>
-        <div id="status">✅ Prêt</div>
-        <button id="btn-scan">SCANNER LA SÉLECTION</button>
+        <h3>Explorateur de Données BIM</h3>
+        <div id="status">✅ Prêt pour l'exploration</div>
+        <button id="btn-scan">SCANNER TOUTES LES DONNÉES</button>
         <div id="ui-filter" style="display:none;">
-            <select id="prop-selector" style="margin-top:10px;"></select>
+            <p style="font-size:11px; color:#0078d4;">Sélectionnez un paramètre pour filtrer :</p>
+            <select id="prop-selector"></select>
             <div id="results" style="margin-top:10px;"></div>
         </div>
     </div>
@@ -28,49 +29,31 @@
     <script>
         let API = null;
         let selectionData = [];
-        const TARGET_SET = "01_MANILA w PARAMETRIC";
 
         async function init() {
             try {
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-                document.getElementById('status').innerText = "✅ Système prêt";
             } catch (e) { console.error(e); }
         }
 
         document.getElementById('btn-scan').onclick = async function() {
             const btn = this;
             const status = document.getElementById('status');
-            btn.innerText = "⏳ SCAN EN COURS...";
+            btn.innerText = "⏳ LECTURE TOTALE...";
             
             try {
-                // 1. On tente de récupérer la sélection
-                let rawSelection = await API.viewer.getSelection();
-                
-                // Si vide, on attend 200ms et on réessaie (parfois le clic est trop rapide)
-                if (!rawSelection || rawSelection.length === 0) {
-                    await new Promise(r => setTimeout(r, 200));
-                    rawSelection = await API.viewer.getSelection();
-                }
+                const rawSelection = await API.viewer.getSelection();
+                const ids = rawSelection.map(item => (typeof item === 'object' ? (item.id || item.runtimeId) : item));
 
-                if (!rawSelection || rawSelection.length === 0) {
-                    status.innerText = "⚠️ Cliquez sur l'objet AVANT le bouton !";
-                    btn.innerText = "SCANNER LA SÉLECTION";
+                if (!ids || ids.length === 0) {
+                    status.innerText = "⚠️ Sélectionnez un objet en 3D d'abord !";
+                    btn.innerText = "SCANNER TOUTES LES DONNÉES";
                     return;
                 }
 
-                // Extraction ID avec nettoyage profond
-                const ids = rawSelection.map(item => {
-                    if (typeof item === 'string') return item;
-                    return item.id || item.runtimeId || item.objectId;
-                }).filter(id => id !== undefined);
-
-                status.innerText = "Analyse de " + ids.length + " objets...";
-
-                // 2. On essaie de récupérer les propriétés (viewer puis project)
-                let results = [];
-                try {
-                    results = await API.viewer.getObjectProperties(ids);
-                } catch(e) {
+                // On récupère les propriétés par le Viewer ET le Projet pour être sûr
+                let results = await API.viewer.getObjectProperties(ids);
+                if (!results || results.length === 0) {
                     results = await API.project.getProperties(ids);
                 }
                 
@@ -78,32 +61,39 @@
                 const props = new Set();
                 
                 selectionData.forEach(obj => {
+                    // 1. On prend tout ce qui est à la racine
+                    if (obj.properties) Object.keys(obj.properties).forEach(k => props.add(k));
+                    
+                    // 2. On prend tout ce qui est dans TOUS les PropertySets (Manila ou autre)
                     if (obj.propertySets) {
                         obj.propertySets.forEach(ps => {
-                            if (ps.name && ps.name.trim() === TARGET_SET && ps.properties) {
+                            if (ps.properties) {
                                 Object.keys(ps.properties).forEach(k => props.add(k));
                             }
                         });
                     }
-                    if (obj.properties) Object.keys(obj.properties).forEach(k => props.add(k));
                 });
 
+                const sel = document.getElementById('prop-selector');
                 if (props.size > 0) {
-                    const sel = document.getElementById('prop-selector');
                     sel.innerHTML = '<option value="">-- ' + props.size + ' Paramètres trouvés --</option>';
-                    Array.from(props).sort().forEach(p => sel.innerHTML += `<option value="${p}">${p}</option>`);
+                    // On trie les noms de paramètres par ordre alphabétique
+                    Array.from(props).sort().forEach(p => {
+                        const opt = document.createElement('option');
+                        opt.value = p; opt.innerText = p;
+                        sel.appendChild(opt);
+                    });
                     document.getElementById('ui-filter').style.display = "block";
-                    btn.innerText = "✅ SCAN RÉUSSI";
+                    btn.innerText = "✅ EXPLORATION RÉUSSIE";
                     btn.style.backgroundColor = "#107c10";
+                    status.innerText = "✅ " + ids.length + " objets analysés.";
                 } else {
                     btn.innerText = "⚠️ AUCUNE DONNÉE";
-                    status.innerText = "Sélection OK, mais Manila non trouvé sur ces objets.";
-                    btn.style.backgroundColor = "#666";
+                    status.innerText = "L'objet n'a aucune donnée BIM visible par l'API.";
                 }
 
             } catch (err) {
                 status.innerText = "Erreur: " + err.message;
-                btn.innerText = "❌ ERREUR";
             }
         };
 
@@ -115,34 +105,29 @@
 
             const groups = {};
             selectionData.forEach(o => {
-                let v = "Inconnu";
-                if (o.propertySets) {
+                let v = "Non défini";
+                
+                // Recherche de la valeur partout
+                if (o.properties && o.properties[p] !== undefined) {
+                    v = o.properties[p];
+                } else if (o.propertySets) {
                     o.propertySets.forEach(ps => {
-                        if (ps.name && ps.name.trim() === TARGET_SET && ps.properties && ps.properties[p] !== undefined) {
+                        if (ps.properties && ps.properties[p] !== undefined) {
                             v = ps.properties[p];
                         }
                     });
                 }
-                if (v === "Inconnu" && o.properties && o.properties[p] !== undefined) v = o.properties[p];
                 
                 if(!groups[v]) groups[v] = [];
-                groups[v].push(o.id || o.runtimeId);
+                groups[v].push(o.id);
             });
 
             Object.keys(groups).sort().forEach(v => {
                 const div = document.createElement('div');
                 div.className = "row";
                 div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v} (${groups[v].length})</span>`;
-                
-                div.querySelector('input').onchange = async (ev) => {
-                    try {
-                        const targetIds = groups[v];
-                        if (API.viewer && API.viewer.setObjectVisibility) {
-                            await API.viewer.setObjectVisibility(targetIds, ev.target.checked);
-                        } else if (API.view && API.view.setObjectVisibility) {
-                            await API.view.setObjectVisibility(targetIds, ev.target.checked);
-                        }
-                    } catch (err) { console.error(err); }
+                div.querySelector('input').onchange = (ev) => {
+                    API.viewer.setObjectVisibility(groups[v], ev.target.checked);
                 };
                 res.appendChild(div);
             });
