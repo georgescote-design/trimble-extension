@@ -2,62 +2,67 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Diagnostic Automatique</title>
+    <title>Diagnostic de Force</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
-        body { font-family: sans-serif; padding: 15px; font-size: 13px; }
-        .log-box { background: #222; color: #0f0; padding: 10px; border-radius: 5px; height: 250px; overflow-y: auto; font-family: monospace; }
-        .status { margin-bottom: 10px; font-weight: bold; }
+        body { font-family: sans-serif; padding: 10px; background: #f4f4f4; font-size: 12px; }
+        .card { background: white; border: 1px solid #ccc; padding: 10px; border-radius: 4px; }
+        .console { background: #000; color: #0f0; padding: 8px; height: 200px; overflow-y: auto; font-family: monospace; margin-top: 10px; border-radius: 4px; }
+        .api-list { font-size: 10px; color: #666; background: #eee; padding: 5px; margin-top: 5px; }
     </style>
 </head>
 <body>
-    <div class="status" id="status">⏳ Connexion à Trimble...</div>
-    <div class="log-box" id="console">En attente d'un clic sur un objet...</div>
+    <div class="card">
+        <strong>Statut :</strong> <span id="status">Initialisation...</span>
+        <div class="api-list" id="api-methods">Outils détectés : (recherche...)</div>
+    </div>
+    
+    <div class="console" id="log-box">En attente de connexion...</div>
 
     <script>
         let API;
-        const consoleBox = document.getElementById('console');
+        const logBox = document.getElementById('log-box');
         
         function log(msg) {
-            consoleBox.innerHTML = `<div>> ${msg}</div>` + consoleBox.innerHTML;
+            const time = new Date().toLocaleTimeString().split(' ')[0];
+            logBox.innerHTML = `<div>[${time}] ${msg}</div>` + logBox.innerHTML;
         }
 
         async function init() {
             try {
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-                document.getElementById('status').innerText = "✅ CONNECTÉ. Cliquez sur un objet en 3D !";
+                document.getElementById('status').innerText = "✅ CONNECTÉ";
                 
-                // --- LA SOLUTION REBELLE ---
-                // Au lieu d'attendre un clic sur un bouton, on écoute l'événement de sélection de Trimble
-                API.viewer.on("selection-changed", async (data) => {
-                    log("Sélection changée détectée !");
-                    
-                    if (!data || data.length === 0) {
-                        log("⚠️ Sélection vide reçue.");
-                        return;
-                    }
+                // On liste ce que ton API sait VRAIMENT faire
+                if (API.viewer) {
+                    const methods = Object.keys(API.viewer).filter(m => typeof API.viewer[m] === 'function');
+                    document.getElementById('api-methods').innerText = "Fonctions Viewer : " + methods.join(', ');
+                }
 
-                    log(`ID reçu : ${JSON.stringify(data[0])}`);
-                    
+                // --- LE POLLING (L'astuce de la dernière chance) ---
+                // On vérifie la sélection toutes les 1000ms (1 seconde)
+                setInterval(async () => {
                     try {
-                        // On tente immédiatement de lire les propriétés de cet ID
-                        const ids = data.map(i => typeof i === 'object' ? (i.id || i.runtimeId) : i);
-                        const props = await API.viewer.getObjectProperties(ids);
-                        
-                        if (props && props.length > 0) {
-                            log("✅ DONNÉES TROUVÉES !");
-                            log("Groupes dispos : " + props[0].propertySets.map(ps => ps.name).join(', '));
-                        } else {
-                            log("❌ Objet identifié mais propriétés vides.");
+                        const sel = await API.viewer.getSelection();
+                        if (sel && sel.length > 0) {
+                            // On décompose l'objet pour voir ce qu'il y a dedans
+                            const first = sel[0];
+                            const id = (typeof first === 'object') ? (first.id || first.runtimeId || "ID masqué") : first;
+                            log(`Objet détecté ! ID : ${id}`);
+                            
+                            // Si on a un ID, on essaie de lire Manila
+                            const props = await API.viewer.getObjectProperties([id]);
+                            if (props && props.length > 0) {
+                                log("Données BIM lues avec succès.");
+                            }
                         }
-                    } catch (err) {
-                        log("❌ Erreur lecture : " + err.message);
+                    } catch (e) {
+                        // On ne log pas l'erreur ici pour ne pas polluer si rien n'est sélectionné
                     }
-                });
+                }, 1000);
 
             } catch (e) {
-                document.getElementById('status').innerText = "❌ Échec de connexion";
-                log("Erreur : " + e.message);
+                log("Erreur critique : " + e.message);
             }
         }
         init();
