@@ -2,69 +2,134 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Diagnostic de Force</title>
+    <title>Filtre BIM Georges - Final</title>
     <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
     <style>
-        body { font-family: sans-serif; padding: 10px; background: #f4f4f4; font-size: 12px; }
-        .card { background: white; border: 1px solid #ccc; padding: 10px; border-radius: 4px; }
-        .console { background: #000; color: #0f0; padding: 8px; height: 200px; overflow-y: auto; font-family: monospace; margin-top: 10px; border-radius: 4px; }
-        .api-list { font-size: 10px; color: #666; background: #eee; padding: 5px; margin-top: 5px; }
+        body { font-family: sans-serif; padding: 15px; background: white; }
+        .card { border: 2px solid #0078d4; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h3 { margin-top: 0; color: #333; font-size: 14px; }
+        #status { font-size: 11px; padding: 8px; background: #f0f0f0; border-radius: 4px; margin-bottom: 10px; color: #444; }
+        select { width: 100%; padding: 8px; border: 1px solid #0078d4; border-radius: 4px; margin-top: 10px; }
+        .row { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; font-size: 12px; }
+        .count { color: #0078d4; font-weight: bold; margin-left: auto; }
     </style>
 </head>
 <body>
     <div class="card">
-        <strong>Statut :</strong> <span id="status">Initialisation...</span>
-        <div class="api-list" id="api-methods">Outils détectés : (recherche...)</div>
+        <h3>Filtre Intelligent : 01_MANILA</h3>
+        <div id="status">⏳ Connexion à Trimble...</div>
+        
+        <div id="ui-container" style="display:none;">
+            <div style="font-size: 11px; color: #666;">1. Sélectionnez vos objets en 3D<br>2. Choisissez un paramètre :</div>
+            <select id="prop-selector"></select>
+            <div id="results" style="margin-top:15px;"></div>
+        </div>
     </div>
-    
-    <div class="console" id="log-box">En attente de connexion...</div>
 
     <script>
-        let API;
-        const logBox = document.getElementById('log-box');
-        
-        function log(msg) {
-            const time = new Date().toLocaleTimeString().split(' ')[0];
-            logBox.innerHTML = `<div>[${time}] ${msg}</div>` + logBox.innerHTML;
-        }
+        let API = null;
+        let lastSelectionStr = "";
+        let currentData = [];
 
         async function init() {
             try {
                 API = await TrimbleConnectWorkspace.connect(window.parent);
-                document.getElementById('status').innerText = "✅ CONNECTÉ";
+                document.getElementById('status').innerText = "✅ Connecté. Sélectionnez des objets.";
+                document.getElementById('ui-container').style.display = "block";
                 
-                // On liste ce que ton API sait VRAIMENT faire
-                if (API.viewer) {
-                    const methods = Object.keys(API.viewer).filter(m => typeof API.viewer[m] === 'function');
-                    document.getElementById('api-methods').innerText = "Fonctions Viewer : " + methods.join(', ');
-                }
+                // Lancement de la surveillance automatique
+                startMonitoring();
+            } catch (e) { document.getElementById('status').innerText = "❌ Erreur de connexion"; }
+        }
 
-                // --- LE POLLING (L'astuce de la dernière chance) ---
-                // On vérifie la sélection toutes les 1000ms (1 seconde)
-                setInterval(async () => {
-                    try {
-                        const sel = await API.viewer.getSelection();
-                        if (sel && sel.length > 0) {
-                            // On décompose l'objet pour voir ce qu'il y a dedans
-                            const first = sel[0];
-                            const id = (typeof first === 'object') ? (first.id || first.runtimeId || "ID masqué") : first;
-                            log(`Objet détecté ! ID : ${id}`);
-                            
-                            // Si on a un ID, on essaie de lire Manila
-                            const props = await API.viewer.getObjectProperties([id]);
-                            if (props && props.length > 0) {
-                                log("Données BIM lues avec succès.");
-                            }
-                        }
-                    } catch (e) {
-                        // On ne log pas l'erreur ici pour ne pas polluer si rien n'est sélectionné
+        // Surveille la sélection toutes les secondes
+        function startMonitoring() {
+            setInterval(async () => {
+                try {
+                    const sel = await API.viewer.getSelection();
+                    const selStr = JSON.stringify(sel);
+                    
+                    // Si la sélection a changé, on analyse
+                    if (sel && sel.length > 0 && selStr !== lastSelectionStr) {
+                        lastSelectionStr = selStr;
+                        analyzeSelection(sel);
                     }
-                }, 1000);
+                } catch (e) {}
+            }, 1000);
+        }
 
-            } catch (e) {
-                log("Erreur critique : " + e.message);
+        async function analyzeSelection(selection) {
+            const status = document.getElementById('status');
+            status.innerText = "⏳ Analyse de " + selection.length + " objets...";
+            
+            try {
+                // On récupère les propriétés (la fonction existe dans ta liste !)
+                const results = await API.viewer.getObjectProperties(selection);
+                currentData = results || [];
+                
+                const props = new Set();
+                currentData.forEach(obj => {
+                    // On scanne les dossiers de propriétés (Manila est là-dedans)
+                    if (obj.propertySets) {
+                        obj.propertySets.forEach(ps => {
+                            if (ps.properties) Object.keys(ps.properties).forEach(k => props.add(k));
+                        });
+                    }
+                    if (obj.properties) Object.keys(obj.properties).forEach(k => props.add(k));
+                });
+
+                const selMenu = document.getElementById('prop-selector');
+                selMenu.innerHTML = '<option value="">-- ' + props.size + ' Paramètres trouvés --</option>';
+                Array.from(props).sort().forEach(p => {
+                    selMenu.innerHTML += `<option value="${p}">${p}</option>`;
+                });
+                
+                status.innerText = "✅ " + currentData.length + " objets analysés.";
+            } catch (err) {
+                status.innerText = "❌ Erreur : " + err.message;
             }
         }
+
+        document.getElementById('prop-selector').onchange = (e) => {
+            const p = e.target.value;
+            const res = document.getElementById('results');
+            res.innerHTML = "";
+            if (!p) return;
+
+            const groups = {};
+            currentData.forEach(o => {
+                let val = "Inconnu";
+                if (o.propertySets) {
+                    o.propertySets.forEach(ps => {
+                        if (ps.properties && ps.properties[p] !== undefined) val = ps.properties[p];
+                    });
+                }
+                if (val === "Inconnu" && o.properties && o.properties[p] !== undefined) val = o.properties[p];
+                
+                if (!groups[val]) groups[val] = [];
+                // On stocke l'objet complet pour la visibilité
+                groups[val].push(o.runtimeId || o.id || o);
+            });
+
+            Object.keys(groups).sort().forEach(v => {
+                const div = document.createElement('div');
+                div.className = "row";
+                div.innerHTML = `<input type="checkbox" checked> <span style="margin-left:8px">${v}</span> <span class="count">${groups[v].length}</span>`;
+                
+                div.querySelector('input').onchange = async (ev) => {
+                    // Utilisation de isolateEntities si setObjectVisibility est capricieux
+                    if (ev.target.checked) {
+                        // On ré-affiche (ici on utilise setOpacity 1 ou toggle)
+                        await API.viewer.setOpacity(groups[v], 1);
+                    } else {
+                        // On masque (opacité 0)
+                        await API.viewer.setOpacity(groups[v], 0);
+                    }
+                };
+                res.appendChild(div);
+            });
+        };
+
         init();
     </script>
 </body>
