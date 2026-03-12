@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Filtre avancé par catégorie</title>
+    <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 15px; background: white; }
+        .card { border: 2px solid #2c3e50; padding: 15px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .header-container { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px; }
+        .title-group { display: flex; flex-direction: column; }
+        h3 { margin: 0; color: #2c3e50; font-size: 16px; line-height: 1.2; }
+        .author-tag { font-size: 11px; color: #7f8c8d; font-weight: normal; margin-top: 2px; }
+        #btn-lang { background: #ecf0f1; border: 1px solid #bdc3c7; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px; font-weight: bold; }
+        #status { font-size: 12px; padding: 8px; background: #ecf0f1; border-radius: 4px; margin-bottom: 15px; color: #34495e; }
+        .upload-label { display: block; border: 2px dashed #3498db; border-radius: 8px; padding: 25px 10px; text-align: center; background: #ebf5fb; color: #2980b9; cursor: pointer; margin-bottom: 15px; font-weight: bold; font-size: 13px; }
+        #file-input { display: none; }
+        
+        /* Style pour les deux sélecteurs côte à côte */
+        .filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+        select { width: 100%; padding: 8px; border: 2px solid #3498db; border-radius: 4px; font-size: 12px; }
+        
+        .row { display: flex; align-items: center; padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 12px; }
+        .count { color: #7f8c8d; font-weight: bold; margin-left: auto; font-size: 10px; }
+        input[type="color"] { border: none; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; margin: 0 8px; padding: 0; }
+        #btn-reset { background: #e74c3c; color: white; border: none; padding: 8px; border-radius: 4px; font-size: 11px; cursor: pointer; font-weight: bold; display: none; margin-bottom: 10px; width: 100%; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="header-container">
+            <div class="title-group">
+                <h3 id="ui-title-text">Filtre avancé par catégorie</h3>
+                <span id="ui-author" class="author-tag"></span>
+            </div>
+            <button id="btn-lang">🇬🇧 EN</button>
+        </div>
+        <div id="status">⏳ Chargement...</div>
+        <label for="file-input" class="upload-label" id="upload-zone">📂 CLIQUEZ ICI POUR IMPORTER LE CSV</label>
+        <input type="file" id="file-input" accept=".csv" />
+        
+        <div id="ui-filter" style="display:none;">
+            <div class="filter-grid">
+                <div>
+                    <p id="label-filter1" style="font-size:11px; font-weight:bold; margin-bottom:3px;">Critère 1 :</p>
+                    <select id="prop-selector-1"></select>
+                </div>
+                <div>
+                    <p id="label-filter2" style="font-size:11px; font-weight:bold; margin-bottom:3px;">Critère 2 :</p>
+                    <select id="prop-selector-2"></select>
+                </div>
+            </div>
+            <button id="btn-reset">🔄 RÉINITIALISER TOUT</button>
+            <div id="results" style="margin-top:10px;"></div>
+        </div>
+    </div>
+
+    <script>
+        const TON_NOM = "G.Côté Groupe Canam inc."; 
+        let API = null;
+        let tableData = [];
+        let guidColumnName = "";
+        let currentLang = 'fr';
+        
+        const i18n = {
+            fr: { title: "Filtre avancé", author: `(${TON_NOM})`, upload: "📂 CLIQUEZ ICI POUR IMPORTER LE CSV", filter1: "Critère 1 :", filter2: "Critère 2 :", reset: "🔄 RÉINITIALISER TOUT", statusConnecting: "⏳ Connexion...", statusConnected: "✅ Prêt.", statusErrorConn: "❌ Erreur (F5).", statusLoading: "⏳ Analyse...", statusLoaded: (count) => `✅ ${count} objets.`, selectParam: "-- Choisir --", prepFilter: "⏳ Filtrage...", langBtn: "🇬🇧 EN", notDefined: "N/A" },
+            en: { title: "Advanced Filter", author: `(${TON_NOM})`, upload: "📂 CLICK HERE TO IMPORT CSV", filter1: "Criteria 1:", filter2: "Criteria 2:", reset: "🔄 RESET ALL", statusConnecting: "⏳ Connecting...", statusConnected: "✅ Ready.", statusErrorConn: "❌ Error (F5).", statusLoading: "⏳ Analyzing...", statusLoaded: (count) => `✅ ${count} objects.`, selectParam: "-- Select --", prepFilter: "⏳ Filtering...", langBtn: "🇫🇷 FR", notDefined: "N/A" }
+        };
+
+        function t(key, param) {
+            if (typeof i18n[currentLang][key] === 'function') return i18n[currentLang][key](param);
+            return i18n[currentLang][key];
+        }
+
+        function updateUI() {
+            document.getElementById('ui-title-text').innerText = t('title');
+            document.getElementById('ui-author').innerText = t('author');
+            document.getElementById('upload-zone').innerText = t('upload');
+            document.getElementById('label-filter1').innerText = t('filter1');
+            document.getElementById('label-filter2').innerText = t('filter2');
+            document.getElementById('btn-reset').innerText = t('reset');
+            document.getElementById('btn-lang').innerText = t('langBtn');
+            const s1 = document.getElementById('prop-selector-1');
+            const s2 = document.getElementById('prop-selector-2');
+            if (s1.options[0]) s1.options[0].text = t('selectParam');
+            if (s2.options[0]) s2.options[0].text = t('selectParam');
+        }
+
+        document.getElementById('btn-lang').onclick = () => { currentLang = currentLang === 'fr' ? 'en' : 'fr'; updateUI(); };
+
+        async function init() {
+            updateUI();
+            try { 
+                API = await TrimbleConnectWorkspace.connect(window.parent); 
+                document.getElementById('status').innerText = t('statusConnected');
+            } catch (e) { document.getElementById('status').innerText = t('statusErrorConn'); }
+        }
+
+        document.getElementById('file-input').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            Papa.parse(file, {
+                header: true, skipEmptyLines: true,
+                complete: function(results) {
+                    tableData = results.data;
+                    guidColumnName = results.meta.fields.find(h => h.toUpperCase().includes("GUID"));
+                    const s1 = document.getElementById('prop-selector-1');
+                    const s2 = document.getElementById('prop-selector-2');
+                    const options = `<option value="">${t('selectParam')}</option>` + 
+                                    results.meta.fields.filter(h => h !== guidColumnName).map(h => `<option value="${h}">${h}</option>`).join('');
+                    s1.innerHTML = options;
+                    s2.innerHTML = options;
+                    document.getElementById('ui-filter').style.display = "block";
+                    document.getElementById('upload-zone').style.display = "none";
+                    document.getElementById('status').innerText = t('statusLoaded', tableData.length);
+                }
+            });
+        });
+
+        // LOGIQUE DE FILTRAGE CROISÉ
+        async function applyCrossFilter() {
+            const col1 = document.getElementById('prop-selector-1').value;
+            const col2 = document.getElementById('prop-selector-2').value;
+            const res = document.getElementById('results');
+            if (!col1) { res.innerHTML = ""; return; }
+
+            document.getElementById('btn-reset').style.display = "block";
+            res.innerHTML = t('prepFilter');
+
+            // On crée des groupes basés sur le premier critère, mais filtrés par le second
+            const groups = {};
+            tableData.forEach(row => {
+                const val1 = row[col1] || t('notDefined');
+                const val2 = col2 ? (row[col2] || t('notDefined')) : null;
+
+                // Si le critère 2 est actif, on ne garde que les lignes où Critère 1 existe
+                if (!groups[val1]) groups[val1] = [];
+                if (row[guidColumnName]) groups[val1].push(row[guidColumnName]);
+            });
+
+            res.innerHTML = "";
+            // Le rendu reste similaire mais la puissance est dans la sélection initiale
+            Object.keys(groups).sort().forEach(val => {
+                const div = document.createElement('div');
+                div.className = "row";
+                div.innerHTML = `<input type="checkbox" class="vis-check" checked> <span>${val}</span><span class="count">(${groups[val].length})</span>`;
+                
+                div.querySelector('.vis-check').onchange = async (ev) => {
+                    const models = await API.viewer.getModels();
+                    let arr = [];
+                    for (const m of models) {
+                        const rIds = await API.viewer.convertToObjectRuntimeIds(m.id || m.modelId, groups[val]);
+                        if (rIds.length) arr.push({ modelId: m.id || m.modelId, objectRuntimeIds: rIds });
+                    }
+                    await API.viewer.setObjectState({ modelObjectIds: arr }, { visible: ev.target.checked });
+                };
+                res.appendChild(div);
+            });
+        }
+
+        document.getElementById('prop-selector-1').onchange = applyCrossFilter;
+        document.getElementById('prop-selector-2').onchange = applyCrossFilter;
+
+        document.getElementById('btn-reset').onclick = async () => {
+            await API.viewer.resetColors();
+            const models = await API.viewer.getModels();
+            for(const m of models) await API.viewer.setObjectState({ modelId: m.id || m.modelId, all: true }, { visible: true });
+            document.getElementById('prop-selector-1').value = "";
+            document.getElementById('prop-selector-2').value = "";
+            document.getElementById('results').innerHTML = "";
+        };
+
+        init();
+    </script>
+</body>
+</html>
