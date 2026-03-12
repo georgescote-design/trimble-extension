@@ -8,26 +8,19 @@
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 15px; background: white; }
         .card { border: 2px solid #2c3e50; padding: 15px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        
-        /* Style du titre et du nom en petit */
         .header-container { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px; }
         .title-group { display: flex; flex-direction: column; }
         h3 { margin: 0; color: #2c3e50; font-size: 16px; line-height: 1.2; }
         .author-tag { font-size: 11px; color: #7f8c8d; font-weight: normal; margin-top: 2px; }
-        
-        #btn-lang { background: #ecf0f1; border: 1px solid #bdc3c7; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px; font-weight: bold; color: #2c3e50; }
+        #btn-lang { background: #ecf0f1; border: 1px solid #bdc3c7; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px; font-weight: bold; }
         #status { font-size: 12px; padding: 8px; background: #ecf0f1; border-radius: 4px; margin-bottom: 15px; color: #34495e; }
-        .upload-label { display: block; border: 2px dashed #3498db; border-radius: 8px; padding: 25px 10px; text-align: center; background: #ebf5fb; color: #2980b9; cursor: pointer; transition: all 0.3s ease; margin-bottom: 15px; font-weight: bold; font-size: 13px; }
+        .upload-label { display: block; border: 2px dashed #3498db; border-radius: 8px; padding: 25px 10px; text-align: center; background: #ebf5fb; color: #2980b9; cursor: pointer; margin-bottom: 15px; font-weight: bold; font-size: 13px; }
         #file-input { display: none; }
-        
         select { width: 100%; padding: 10px; border: 2px solid #3498db; border-radius: 4px; margin-bottom: 10px; font-size: 13px; }
         .row { display: flex; align-items: center; padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 12px; }
         .count { color: #7f8c8d; font-weight: bold; margin-left: auto; font-size: 10px; }
-        
-        input[type="color"] { border: none; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; margin: 0 8px; padding: 0; background: none; }
-        
+        input[type="color"] { border: none; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; margin: 0 8px; padding: 0; }
         #btn-reset { background: #e74c3c; color: white; border: none; padding: 8px; border-radius: 4px; font-size: 11px; cursor: pointer; font-weight: bold; display: none; margin-bottom: 10px; width: 100%; }
-        #btn-reset:hover { background: #c0392b; }
     </style>
 </head>
 <body>
@@ -39,12 +32,9 @@
             </div>
             <button id="btn-lang">🇬🇧 EN</button>
         </div>
-        
         <div id="status">⏳ Chargement...</div>
-        
         <label for="file-input" class="upload-label" id="upload-zone">📂 CLIQUEZ ICI POUR IMPORTER LE CSV</label>
         <input type="file" id="file-input" accept=".csv" />
-        
         <div id="ui-filter" style="display:none;">
             <p id="label-filter" style="font-size:12px; margin-bottom:5px; font-weight: bold;">Filtrer par :</p>
             <select id="prop-selector"></select>
@@ -59,40 +49,14 @@
         let tableData = [];
         let guidColumnName = "";
         let currentLang = 'fr';
+        
+        // --- LE CERVEAU CENTRAL (MÉMOIRE D'ÉTAT) ---
+        let globalVisibilityState = {}; // Stocke l'état { "Valeur": true/false }
+        let globalColorState = {};      // Stocke les couleurs { "Valeur": "#hex" }
 
         const i18n = {
-            fr: {
-                title: "Filtre avancé par catégorie",
-                author: `(${TON_NOM})`,
-                upload: "📂 CLIQUEZ ICI POUR IMPORTER LE CSV",
-                filterBy: "Filtrer par :",
-                reset: "🔄 TOUT COCHER / DÉCOCHER & RESET COULEURS",
-                statusConnecting: "⏳ Connexion à Trimble...",
-                statusConnected: "✅ Connecté. Prêt.",
-                statusErrorConn: "❌ Erreur : Rafraîchir (F5).",
-                statusLoading: "⏳ Analyse...",
-                statusLoaded: (count) => `✅ ${count} objets chargés.`,
-                selectParam: "-- Sélectionner un paramètre --",
-                prepFilter: "⏳ Préparation...",
-                langBtn: "🇬🇧 EN",
-                notDefined: "Non défini"
-            },
-            en: {
-                title: "Advanced Category Filter",
-                author: `(${TON_NOM})`,
-                upload: "📂 CLICK HERE TO IMPORT CSV",
-                filterBy: "Filter by:",
-                reset: "🔄 TOGGLE ALL & RESET COLORS",
-                statusConnecting: "⏳ Connecting to Trimble...",
-                statusConnected: "✅ Connected. Ready.",
-                statusErrorConn: "❌ Error: Please refresh (F5).",
-                statusLoading: "⏳ Analyzing...",
-                statusLoaded: (count) => `✅ ${count} objects loaded.`,
-                selectParam: "-- Select a parameter --",
-                prepFilter: "⏳ Preparing...",
-                langBtn: "🇫🇷 FR",
-                notDefined: "Undefined"
-            }
+            fr: { title: "Filtre avancé par catégorie", author: `(${TON_NOM})`, upload: "📂 CLIQUEZ ICI POUR IMPORTER LE CSV", filterBy: "Filtrer par :", reset: "🔄 TOUT COCHER / DÉCOCHER & RESET COULEURS", statusConnecting: "⏳ Connexion à Trimble...", statusConnected: "✅ Connecté. Prêt.", statusErrorConn: "❌ Erreur : Rafraîchir (F5).", statusLoading: "⏳ Analyse...", statusLoaded: (count) => `✅ ${count} objets chargés.`, selectParam: "-- Sélectionner un paramètre --", prepFilter: "⏳ Préparation...", langBtn: "🇬🇧 EN", notDefined: "Non défini" },
+            en: { title: "Advanced Category Filter", author: `(${TON_NOM})`, upload: "📂 CLICK HERE TO IMPORT CSV", filterBy: "Filter by:", reset: "🔄 TOGGLE ALL & RESET COLORS", statusConnecting: "⏳ Connecting to Trimble...", statusConnected: "✅ Connected. Ready.", statusErrorConn: "❌ Error: Please refresh (F5).", statusLoading: "⏳ Analyzing...", statusLoaded: (count) => `✅ ${count} objects loaded.`, selectParam: "-- Select a parameter --", prepFilter: "⏳ Preparing...", langBtn: "🇫🇷 FR", notDefined: "Undefined" }
         };
 
         function t(key, param) {
@@ -107,10 +71,8 @@
             document.getElementById('label-filter').innerText = t('filterBy');
             document.getElementById('btn-reset').innerText = t('reset');
             document.getElementById('btn-lang').innerText = t('langBtn');
-
             const menu = document.getElementById('prop-selector');
             if (menu && menu.options.length > 0) menu.options[0].text = t('selectParam');
-
             const statusDiv = document.getElementById('status');
             if (tableData.length > 0) statusDiv.innerText = t('statusLoaded', tableData.length);
         }
@@ -118,9 +80,6 @@
         document.getElementById('btn-lang').onclick = () => {
             currentLang = currentLang === 'fr' ? 'en' : 'fr';
             updateUI();
-            if (tableData.length === 0) {
-                document.getElementById('status').innerText = API ? t('statusConnected') : t('statusErrorConn');
-            }
         };
 
         function hexToRgba(hex) {
@@ -132,7 +91,6 @@
 
         async function init() {
             updateUI();
-            document.getElementById('status').innerText = t('statusConnecting');
             try { 
                 API = await TrimbleConnectWorkspace.connect(window.parent); 
                 document.getElementById('status').innerText = t('statusConnected');
@@ -142,22 +100,17 @@
         document.getElementById('file-input').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
-            document.getElementById('status').innerText = t('statusLoading');
             Papa.parse(file, {
                 header: true, skipEmptyLines: true,
                 complete: function(results) {
                     tableData = results.data;
-                    const headers = results.meta.fields;
-                    guidColumnName = headers.find(h => h.toUpperCase().includes("GUID"));
-                    if (!guidColumnName) return;
-
+                    guidColumnName = results.meta.fields.find(h => h.toUpperCase().includes("GUID"));
                     const menu = document.getElementById('prop-selector');
                     menu.innerHTML = `<option value="">${t('selectParam')}</option>`;
-                    headers.forEach(h => { if (h !== guidColumnName) menu.innerHTML += `<option value="${h}">${h}</option>`; });
-
+                    results.meta.fields.forEach(h => { if (h !== guidColumnName) menu.innerHTML += `<option value="${h}">${h}</option>`; });
                     document.getElementById('ui-filter').style.display = "block";
                     document.getElementById('upload-zone').style.display = "none";
-                    document.getElementById('status').innerText = t('statusLoaded', tableData.length);
+                    updateUI();
                 }
             });
         });
@@ -165,10 +118,9 @@
         document.getElementById('prop-selector').onchange = async (e) => {
             const selectedCol = e.target.value;
             const res = document.getElementById('results');
-            const btnReset = document.getElementById('btn-reset');
             res.innerHTML = t('prepFilter');
-            if (!selectedCol) { res.innerHTML = ""; btnReset.style.display = "none"; return; }
-            btnReset.style.display = "block";
+            if (!selectedCol) { res.innerHTML = ""; return; }
+            document.getElementById('btn-reset').style.display = "block";
 
             const groups = {};
             tableData.forEach(row => {
@@ -179,11 +131,15 @@
 
             res.innerHTML = "";
             Object.keys(groups).sort().forEach(val => {
+                // On récupère l'état mémorisé ou "true" par défaut
+                const isChecked = globalVisibilityState[val] !== undefined ? globalVisibilityState[val] : true;
+                const savedColor = globalColorState[val] || "#95a5a6";
+
                 const div = document.createElement('div');
                 div.className = "row";
                 div.innerHTML = `
-                    <input type="checkbox" class="vis-check" checked> 
-                    <input type="color" class="color-picker" value="#95a5a6">
+                    <input type="checkbox" class="vis-check" ${isChecked ? 'checked' : ''}> 
+                    <input type="color" class="color-picker" value="${savedColor}">
                     <span>${val}</span><span class="count">(${groups[val].length})</span>
                 `;
                 
@@ -206,37 +162,41 @@
                 };
 
                 checkbox.onchange = async () => {
+                    globalVisibilityState[val] = checkbox.checked; // On mémorise !
                     const sel = await getSelector();
                     if (sel) await API.viewer.setObjectState(sel, { visible: checkbox.checked });
                 };
 
                 colorPicker.oninput = async (ev) => {
+                    globalColorState[val] = ev.target.value; // On mémorise la couleur !
                     const sel = await getSelector();
                     if (sel) {
                         await API.viewer.setObjectState(sel, { color: hexToRgba(ev.target.value), visible: true });
                         checkbox.checked = true;
+                        globalVisibilityState[val] = true;
                     }
                 };
                 res.appendChild(div);
             });
         };
 
-        // LE BOUTON RESET AMÉLIORÉ (Toggle Tout cocher/décocher)
         document.getElementById('btn-reset').onclick = async () => {
             if(!API) return;
             try { await API.viewer.resetColors(); } catch(e) {}
-            
             const checkboxes = Array.from(document.querySelectorAll('.vis-check'));
-            // Si au moins une case est décochée, on veut TOUT cocher. Sinon, on décoche TOUT.
             const targetState = checkboxes.some(c => !c.checked);
             
-            for (const chk of checkboxes) {
-                if(chk.checked !== targetState) {
-                    chk.checked = targetState;
-                    chk.dispatchEvent(new Event('change'));
-                }
-            }
-            document.querySelectorAll('.color-picker').forEach(cp => cp.value = "#95a5a6");
+            checkboxes.forEach(chk => {
+                const label = chk.parentElement.querySelector('span').innerText;
+                chk.checked = targetState;
+                globalVisibilityState[label] = targetState; // On vide la mémoire aussi
+                chk.dispatchEvent(new Event('change'));
+            });
+            document.querySelectorAll('.color-picker').forEach(cp => {
+                cp.value = "#95a5a6";
+                const label = cp.parentElement.querySelector('span').innerText;
+                globalColorState[label] = "#95a5a6";
+            });
         };
 
         init();
